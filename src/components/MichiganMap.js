@@ -616,6 +616,8 @@ const MichiganMap = ({
                   initialNumToRender={10}
                   maxToRenderPerBatch={10}
                   keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={true}
+                  persistentScrollbar={true}
                   renderItem={({ item }) => (
                     <TouchableOpacity
                       style={[
