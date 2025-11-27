@@ -7,6 +7,7 @@ import {
   Text, 
   Platform,
   TouchableOpacity,
+  Pressable,
   Modal,
   TextInput,
   FlatList,
@@ -27,8 +28,16 @@ const COLORS = {
   defaultStroke: '#A8A498',
   selectedFill: '#5B8DB8',
   selectedStroke: '#4A7A9E',
-  shadow: 'rgba(0,0,0,0.12)',
+  shadow: 'rgba(0,0,0,0.15)',
 };
+
+// Four-color palette for map coloring (muted, professional tones)
+const MAP_COLORS = [
+  '#E8D4B8', // Warm beige
+  '#C5D5C5', // Sage green  
+  '#D4C4B0', // Tan
+  '#B8C8D8', // Light blue-gray
+];
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -68,6 +77,71 @@ const COUNTY_POLYGONS = MICHIGAN_COUNTIES.map(county => ({
   ...county,
   polygon: parseSvgPath(county.path),
 }));
+
+// Check if two points are close enough to be considered shared vertices
+const pointsClose = (p1, p2, tolerance = 2) => {
+  return Math.abs(p1.x - p2.x) < tolerance && Math.abs(p1.y - p2.y) < tolerance;
+};
+
+// Check if two polygons share an edge (adjacent)
+const polygonsAdjacent = (poly1, poly2) => {
+  // Check if any vertices are shared (with tolerance for floating point)
+  let sharedPoints = 0;
+  for (const p1 of poly1) {
+    for (const p2 of poly2) {
+      if (pointsClose(p1, p2)) {
+        sharedPoints++;
+        if (sharedPoints >= 2) return true; // Share an edge (at least 2 points)
+      }
+    }
+  }
+  return false;
+};
+
+// Build adjacency list for all counties
+const buildAdjacencyList = (counties) => {
+  const adjacency = {};
+  counties.forEach(c => adjacency[c.name] = []);
+  
+  for (let i = 0; i < counties.length; i++) {
+    for (let j = i + 1; j < counties.length; j++) {
+      if (polygonsAdjacent(counties[i].polygon, counties[j].polygon)) {
+        adjacency[counties[i].name].push(counties[j].name);
+        adjacency[counties[j].name].push(counties[i].name);
+      }
+    }
+  }
+  return adjacency;
+};
+
+// Greedy graph coloring algorithm
+const assignColors = (counties, adjacency, numColors) => {
+  const colorMap = {};
+  
+  for (const county of counties) {
+    // Find colors used by adjacent counties
+    const usedColors = new Set();
+    for (const neighbor of adjacency[county.name]) {
+      if (colorMap[neighbor] !== undefined) {
+        usedColors.add(colorMap[neighbor]);
+      }
+    }
+    
+    // Assign first available color
+    for (let c = 0; c < numColors; c++) {
+      if (!usedColors.has(c)) {
+        colorMap[county.name] = c;
+        break;
+      }
+    }
+  }
+  
+  return colorMap;
+};
+
+// Pre-compute county colors (only runs once at module load)
+const COUNTY_ADJACENCY = buildAdjacencyList(COUNTY_POLYGONS);
+const COUNTY_COLOR_MAP = assignColors(COUNTY_POLYGONS, COUNTY_ADJACENCY, MAP_COLORS.length);
 
 // Find which county contains the given point (in SVG coordinates)
 const findCountyAtPoint = (svgX, svgY) => {
@@ -493,7 +567,11 @@ const MichiganMap = ({
 
   // Render helpers
   const isSelected = (name) => selectedCounty === name;
-  const getFill = (county) => isSelected(county.name) ? COLORS.selectedFill : COLORS.defaultFill;
+  const getFill = (county) => {
+    if (isSelected(county.name)) return COLORS.selectedFill;
+    const colorIndex = COUNTY_COLOR_MAP[county.name] ?? 0;
+    return MAP_COLORS[colorIndex];
+  };
   const getStroke = (county) => isSelected(county.name) ? COLORS.selectedStroke : COLORS.defaultStroke;
 
   const { width: MAP_WIDTH, height: MAP_HEIGHT } = mapDimensions;
@@ -558,12 +636,12 @@ const MichiganMap = ({
                     <Text style={styles.noResults}>No counties found</Text>
                   }
                 />
-                <TouchableOpacity 
-                  style={styles.closeButton}
+                <Pressable 
+                  style={({ pressed }) => [styles.closeButton, pressed && styles.buttonPressed]}
                   onPress={() => setSearchVisible(false)}
                 >
                   <Text style={styles.closeButtonText}>Close</Text>
-                </TouchableOpacity>
+                </Pressable>
               </KeyboardAvoidingView>
             </TouchableWithoutFeedback>
           </View>
@@ -572,12 +650,12 @@ const MichiganMap = ({
       
       <View style={styles.mapWrapper}>
         {/* Search Button - inside mapWrapper */}
-        <TouchableOpacity 
-          style={[styles.searchButton, { top: 8, right: 8 }]}
+        <Pressable 
+          style={({ pressed }) => [styles.searchButton, { top: 8, right: 8 }, pressed && styles.buttonPressed]}
           onPress={() => setSearchVisible(true)}
         >
           <Text style={styles.searchButtonText}>Search your County</Text>
-        </TouchableOpacity>
+        </Pressable>
         
         {/* Zoom Indicator - inside mapWrapper */}
         {displayScale > 1.05 && (
@@ -607,7 +685,7 @@ const MichiganMap = ({
           >
             <View style={styles.shadowContainer}>
               <Svg width={MAP_WIDTH} height={MAP_HEIGHT} viewBox="0 0 400 500">
-                <G transform="translate(4, 4)">
+                <G transform="translate(6, 6)">
                   {MICHIGAN_COUNTIES.map((county) => (
                     <Path
                       key={`shadow-${county.id}`}
@@ -710,6 +788,12 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#A8A498',
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 6,
   },
   searchButtonText: {
     color: '#2C2C2C',
@@ -781,11 +865,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#A8A498',
     borderRadius: 4,
     alignItems: 'center',
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 8,
   },
   closeButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '500',
+  },
+  buttonPressed: {
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    transform: [{ translateY: 2 }],
   },
 });
 

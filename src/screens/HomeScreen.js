@@ -3,9 +3,10 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  TouchableOpacity, 
+  Pressable, 
   SafeAreaView,
   StatusBar,
+  BackHandler,
 } from 'react-native';
 import MichiganMap from '../components/MichiganMap';
 import { isTargetCounty } from '../data/michiganCounties';
@@ -16,9 +17,11 @@ const COLORS = {
   text: '#2C2C2C',           // Dark text
   buttonBorder: '#2C2C2C',   // Button border
   buttonBackground: '#F5F0E6', // Button background (same as page)
+  exitRed: '#C54B4B',        // Muted red for exit button
+  exitRedBorder: '#A03030',  // Darker red for border
 };
 
-const HomeScreen = ({ navigation }) => {
+const HomeScreen = ({ onNavigateToCity }) => {
   const [selectedCounty, setSelectedCounty] = useState(null);
 
   const handleCountyPress = (county) => {
@@ -31,16 +34,26 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const handleNext = () => {
-    if (selectedCounty) {
-      // Navigate to next screen with selected county
-      console.log('Selected county:', selectedCounty);
-      // navigation.navigate('FarmInput', { county: selectedCounty });
+    if (selectedCounty && onNavigateToCity) {
+      onNavigateToCity(selectedCounty);
     }
+  };
+
+  const handleExit = () => {
+    BackHandler.exitApp();
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      
+      {/* Exit Button - Top Left */}
+      <Pressable 
+        style={({ pressed }) => [styles.exitButton, pressed && styles.exitButtonPressed]}
+        onPress={handleExit}
+      >
+        <Text style={styles.exitButtonText}>✕</Text>
+      </Pressable>
       
       <View style={styles.content}>
         {/* Map Container */}
@@ -57,10 +70,11 @@ const HomeScreen = ({ navigation }) => {
         </Text>
 
         {/* Next Button */}
-        <TouchableOpacity 
-          style={[
+        <Pressable 
+          style={({ pressed }) => [
             styles.nextButton,
-            !selectedCounty && styles.nextButtonDisabled
+            !selectedCounty && styles.nextButtonDisabled,
+            pressed && !(!selectedCounty) && styles.buttonPressed
           ]}
           onPress={handleNext}
           disabled={!selectedCounty}
@@ -71,7 +85,7 @@ const HomeScreen = ({ navigation }) => {
           ]}>
             Next
           </Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -81,6 +95,39 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  exitButton: {
+    position: 'absolute',
+    top: 50,
+    left: 15,
+    zIndex: 100,
+    width: 36,
+    height: 36,
+    borderRadius: 4,
+    backgroundColor: COLORS.exitRed,
+    borderWidth: 2,
+    borderColor: COLORS.exitRedBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 6,
+  },
+  exitButtonPressed: {
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 2 }],
+  },
+  exitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   content: {
     flex: 1,
@@ -94,12 +141,12 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopWidth: 4,
-    borderLeftWidth: 4,
-    borderRightWidth: 2,
-    borderBottomWidth: 2,
-    borderTopColor: '#6B665F',
-    borderLeftColor: '#6B665F',
+    borderTopWidth: 2.5,
+    borderLeftWidth: 10,
+    borderRightWidth: 1.25,
+    borderBottomWidth: 5,
+    borderTopColor: '#5A554E',
+    borderLeftColor: '#5A554E',
     borderRightColor: '#FFFEF8',
     borderBottomColor: '#FFFEF8',
     backgroundColor: '#E8E4DA',
@@ -122,6 +169,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
     marginHorizontal: 20,
+    // Shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 8,
   },
   nextButtonDisabled: {
     borderColor: '#A0A0A0',
@@ -135,6 +188,13 @@ const styles = StyleSheet.create({
   },
   nextButtonTextDisabled: {
     color: '#A0A0A0',
+  },
+  buttonPressed: {
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    transform: [{ translateY: 2 }],
   },
 });
 
