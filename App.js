@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import HomeScreen from './src/screens/HomeScreen';
 import CitySelectionScreen from './src/screens/CitySelectionScreen';
+import MapScreen from './src/screens/MapScreen';
 // import TestPathRendering from './TestPathRendering'; // Uncomment to test
 
 // Set to true to show the test component
@@ -19,14 +20,17 @@ export default function App() {
 
   const handleNavigateToPin = (county, city) => {
     setSelectedCity(city);
-    // TODO: Navigate to pin placement screen (screen 3)
-    console.log('Navigate to pin screen:', county, city);
-    // For now, just log - we'll implement screen 3 later
+    setCurrentScreen('map');
   };
 
   const handleBackToHome = () => {
     setCurrentScreen('home');
     setSelectedCounty(null);
+    setSelectedCity(null);
+  };
+
+  const handleBackToCitySelection = () => {
+    setCurrentScreen('citySelection');
     setSelectedCity(null);
   };
 
@@ -44,6 +48,13 @@ export default function App() {
           county={selectedCounty} 
           onNavigateBack={handleBackToHome}
           onNavigateToPin={(city) => handleNavigateToPin(selectedCounty, city)}
+        />
+      )}
+      {currentScreen === 'map' && selectedCounty && selectedCity && (
+        <MapScreen
+          county={selectedCounty}
+          city={selectedCity}
+          onNavigateBack={handleBackToCitySelection}
         />
       )}
     </>

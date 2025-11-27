@@ -733,6 +733,8 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
                 data={filteredCities}
                 keyExtractor={(item, index) => `${item}-${index}`}
                 style={styles.cityList}
+                showsVerticalScrollIndicator={true}
+                persistentScrollbar={true}
                 renderItem={({ item }) => (
                   <TouchableOpacity style={styles.cityItem} onPress={() => handleSearchSelect(item)}>
                     <Text style={styles.cityItemText}>{item}</Text>
