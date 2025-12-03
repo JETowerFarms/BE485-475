@@ -128,6 +128,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
     textAlignVertical: 'center',
+    lineHeight: 18,
   },
   content: {
     flex: 1,
@@ -185,6 +186,9 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '500',
     color: '#FFFFFF',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    lineHeight: 22,
   },
   nextButtonTextDisabled: {
     color: '#A0A0A0',

@@ -40,3 +40,8 @@ yarn-error.*
 /ios
 /android
 /notes
+
+# large datasets
+src/data/
+Datasets/
+temp_transmission/

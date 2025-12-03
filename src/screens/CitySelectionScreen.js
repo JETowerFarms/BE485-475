@@ -66,14 +66,14 @@ const calculatePolygonArea = (polygon) => {
 };
 
 // Check if two GeoJSON geometries are adjacent (share boundary points)
-const geometriesAdjacent = (geom1, geom2, tolerance = 0.0001) => {
-  // Extract all rings from both geometries
+const geometriesAdjacent = (geom1, geom2, tolerance = 0.001) => {
+  // Extract all rings from both geometries (only outer rings for adjacency)
   const getRings = (geom) => {
     if (!geom) return [];
     if (geom.type === 'Polygon') {
-      return geom.coordinates.map(ring => ring);
+      return [geom.coordinates[0]]; // Only outer ring
     } else if (geom.type === 'MultiPolygon') {
-      return geom.coordinates.flatMap(poly => poly.map(ring => ring));
+      return geom.coordinates.map(poly => poly[0]); // Only outer rings
     }
     return [];
   };
@@ -81,20 +81,25 @@ const geometriesAdjacent = (geom1, geom2, tolerance = 0.0001) => {
   const rings1 = getRings(geom1);
   const rings2 = getRings(geom2);
   
-  // Count shared boundary points between all ring combinations
-  let sharedPoints = 0;
+  // Build a set of points from rings2 for faster lookup
+  const pointSet = new Set();
+  for (const ring2 of rings2) {
+    for (const p2 of ring2) {
+      // Round coordinates to tolerance precision for comparison
+      const key = `${Math.round(p2[0] / tolerance)}_${Math.round(p2[1] / tolerance)}`;
+      pointSet.add(key);
+    }
+  }
   
+  // Check if rings1 has at least 2 points matching rings2
+  let sharedPoints = 0;
   for (const ring1 of rings1) {
-    for (const ring2 of rings2) {
-      // Check each point in ring1 against each point in ring2
-      for (const p1 of ring1) {
-        for (const p2 of ring2) {
-          if (Math.abs(p1[0] - p2[0]) < tolerance && Math.abs(p1[1] - p2[1]) < tolerance) {
-            sharedPoints++;
-            // Two shared points means they share an edge (adjacent)
-            if (sharedPoints >= 2) return true;
-          }
-        }
+    for (const p1 of ring1) {
+      const key = `${Math.round(p1[0] / tolerance)}_${Math.round(p1[1] / tolerance)}`;
+      if (pointSet.has(key)) {
+        sharedPoints++;
+        // Two shared points means they share an edge (adjacent)
+        if (sharedPoints >= 2) return true;
       }
     }
   }
@@ -933,6 +938,9 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '500',
     color: '#FFFFFF',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    lineHeight: 22,
   },
   nextButtonTextDisabled: {
     color: '#A0A0A0',

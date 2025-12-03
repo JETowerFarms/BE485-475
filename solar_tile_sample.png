@@ -1,0 +1,15 @@
+
+
+
+<html>
+
+<body>
+  <h2>Error</h2>
+  
+  <div class="restBody">
+    <h3>Operation not supported.</h3><br/>
+    <b>Code: </b>404<br/><br/>
+    
+  </div>
+</body>
+</html>

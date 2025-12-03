@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -66,10 +66,16 @@ const calculateRingArea = (ring) => {
   return Math.abs(area / 2);
 };
 
-const MapScreen = ({ county, city, onNavigateBack }) => {
+const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext, onFarmsUpdate }) => {
   const [pins, setPins] = useState([]);
-  const [farmPins, setFarmPins] = useState([]); // Pins that are part of built farms (blue)
-  const [farms, setFarms] = useState([]);
+  const [farmPins, setFarmPins] = useState(() => {
+    // Initialize farmPins from initialFarms if provided
+    if (initialFarms && initialFarms.length > 0) {
+      return initialFarms.flatMap(farm => farm.pins || []);
+    }
+    return [];
+  });
+  const [farms, setFarms] = useState(initialFarms || []);
   const [backPressed, setBackPressed] = useState(false);
   
   // Modal states
@@ -115,6 +121,13 @@ const MapScreen = ({ county, city, onNavigateBack }) => {
     longitude: -84.5,
   };
 
+  // Notify parent component when farms change
+  useEffect(() => {
+    if (onFarmsUpdate && farms.length > 0) {
+      onFarmsUpdate(farms);
+    }
+  }, [farms, onFarmsUpdate]);
+
   const handlePinAdd = (newPin) => {
     setPins(currentPins => [...currentPins, {
       ...newPin,
@@ -155,8 +168,17 @@ const MapScreen = ({ county, city, onNavigateBack }) => {
     // Close the polygon by adding the first point at the end
     coordinates.push(coordinates[0]);
     
+    const farmId = Date.now().toString();
+    
+    // Convert current pins to blue farm pins
+    const bluePins = pins.map(pin => ({
+      ...pin,
+      color: '#3B82F6', // Blue color for farm pins
+      farmId: farmId,
+    }));
+    
     const farm = {
-      id: Date.now().toString(),
+      id: farmId,
       type: 'Feature',
       properties: {
         name: `Farm ${farms.length + 1}`,
@@ -169,14 +191,8 @@ const MapScreen = ({ county, city, onNavigateBack }) => {
         type: 'Polygon',
         coordinates: [coordinates],
       },
+      pins: bluePins, // Store the pins with the farm
     };
-    
-    // Convert current pins to blue farm pins
-    const bluePins = pins.map(pin => ({
-      ...pin,
-      color: '#3B82F6', // Blue color for farm pins
-      farmId: farm.id,
-    }));
     
     setFarmPins(currentFarmPins => [...currentFarmPins, ...bluePins]);
     setFarms(currentFarms => [...currentFarms, farm]);
@@ -277,7 +293,7 @@ const MapScreen = ({ county, city, onNavigateBack }) => {
         return p;
       }));
       
-      // Also update the farm geometry
+      // Also update the farm geometry and pins
       setFarms(currentFarms => currentFarms.map(f => {
         if (f.id === selectedFarm.id) {
           const newCoords = [...f.geometry.coordinates[0]];
@@ -286,12 +302,22 @@ const MapScreen = ({ county, city, onNavigateBack }) => {
           if (editingPinIndex === 0) {
             newCoords[newCoords.length - 1] = [newLng, newLat];
           }
+          // Update pins array
+          const newPins = f.pins ? [...f.pins] : [];
+          if (newPins[editingPinIndex]) {
+            newPins[editingPinIndex] = {
+              ...newPins[editingPinIndex],
+              latitude: newLat,
+              longitude: newLng,
+            };
+          }
           return {
             ...f,
             geometry: {
               ...f.geometry,
               coordinates: [newCoords],
             },
+            pins: newPins,
           };
         }
         return f;
@@ -434,8 +460,9 @@ const MapScreen = ({ county, city, onNavigateBack }) => {
               pressed && farms.length > 0 && styles.nextButtonPressed,
             ]}
             onPress={() => {
-              // TODO: Navigate to next screen
-              console.log('Next pressed with farms:', farms);
+              if (onNavigateNext) {
+                onNavigateNext(farms);
+              }
             }}
             disabled={farms.length === 0}
           >
@@ -707,6 +734,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
     textAlignVertical: 'center',
+    lineHeight: 20,
   },
   header: {
     paddingTop: Platform.OS === 'ios' ? 50 : 45,
