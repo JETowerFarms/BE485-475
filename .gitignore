@@ -1,7 +1,9 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
+# Dependencies
 node_modules/
+backend/node_modules/
+OptimizationToolRN/node_modules/
 
 # Expo
 .expo/
@@ -21,27 +23,53 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 
-# debug
+# Debug
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log
 
 # macOS
 .DS_Store
 *.pem
 
-# local env files
+# Local env files
 .env*.local
+.env
+backend/.env
+.env.docker
 
-# typescript
+# Docker volumes and data
+postgres_data/
+pgadmin_data/
+
+# Backend logs
+backend/logs/
+
+# TypeScript
 *.tsbuildinfo
 
-# generated native folders
+# Generated native folders
 /ios
 /android
 /notes
 
-# large datasets
-src/data/
-Datasets/
+# Large data files (keep in local, don't commit to Git)
+michiganSolarSuitability_30x30.json
+michigan_solar_datasets.json
+michigan_mcd_full.geojson
+temp_*.json
+temp_*.geojson
+
+# Temporary files
+temp_michigan.geojson
 temp_transmission/
+debug_coords.py
+test_*.html
+test_*.js
+
+# Build artifacts
+build/
+*.apk
+*.aab
+*.ipa

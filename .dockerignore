@@ -1,0 +1,24 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+.vscode
+.idea
+*.log
+.DS_Store
+Thumbs.db
+backend/node_modules
+backend/logs
+backend/.env
+OptimizationToolRN
+*.geojson
+temp_*
+debug_*
+test_*
+mcd_shp
+temp_transmission
+notes
+migration_configs
+# Keep the solar data file for import
+!michiganSolarSuitability_30x30.json
