@@ -85,14 +85,22 @@ const pointsClose = (p1, p2, tolerance = 2) => {
 
 // Check if two polygons share an edge (adjacent)
 const polygonsAdjacent = (poly1, poly2) => {
-  // Check if any vertices are shared (with tolerance for floating point)
+  // Build a set of points from poly2 for faster lookup
+  const tolerance = 2;
+  const pointSet = new Set();
+  for (const p2 of poly2) {
+    // Round coordinates to tolerance precision for comparison
+    const key = `${Math.round(p2.x / tolerance)}_${Math.round(p2.y / tolerance)}`;
+    pointSet.add(key);
+  }
+  
+  // Check if poly1 has at least 2 points matching poly2
   let sharedPoints = 0;
   for (const p1 of poly1) {
-    for (const p2 of poly2) {
-      if (pointsClose(p1, p2)) {
-        sharedPoints++;
-        if (sharedPoints >= 2) return true; // Share an edge (at least 2 points)
-      }
+    const key = `${Math.round(p1.x / tolerance)}_${Math.round(p1.y / tolerance)}`;
+    if (pointSet.has(key)) {
+      sharedPoints++;
+      if (sharedPoints >= 2) return true; // Share an edge (at least 2 points)
     }
   }
   return false;

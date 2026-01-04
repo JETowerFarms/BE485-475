@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -7,9 +7,11 @@ import {
   SafeAreaView,
   StatusBar,
   BackHandler,
+  ActivityIndicator,
 } from 'react-native';
 import MichiganMap from '../components/MichiganMap';
 import { isTargetCounty } from '../data/michiganCounties';
+import { loadLocation } from '../utils/locationStorage';
 
 // Color scheme matching the reference design
 const COLORS = {
@@ -21,8 +23,23 @@ const COLORS = {
   exitRedBorder: '#A03030',  // Darker red for border
 };
 
-const HomeScreen = ({ onNavigateToCity }) => {
+const HomeScreen = ({ onNavigateToCity, shouldAutoNavigate = true }) => {
   const [selectedCounty, setSelectedCounty] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load saved location on mount (only auto-navigate if allowed)
+  useEffect(() => {
+    const loadSavedLocation = async () => {
+      const { county, city } = await loadLocation();
+      if (county && city && onNavigateToCity && shouldAutoNavigate) {
+        // Auto-navigate to saved location
+        console.log('Auto-navigating to saved location:', city, county);
+        onNavigateToCity(county, city);
+      }
+      setIsLoading(false);
+    };
+    loadSavedLocation();
+  }, [onNavigateToCity, shouldAutoNavigate]);
 
   const handleCountyPress = (county) => {
     // Single select: toggle selection or select new county
@@ -42,6 +59,17 @@ const HomeScreen = ({ onNavigateToCity }) => {
   const handleExit = () => {
     BackHandler.exitApp();
   };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.text} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -128,6 +156,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
     textAlignVertical: 'center',
+    lineHeight: 18,
   },
   content: {
     flex: 1,
@@ -185,6 +214,9 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '500',
     color: '#FFFFFF',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    lineHeight: 22,
   },
   nextButtonTextDisabled: {
     color: '#A0A0A0',
@@ -195,6 +227,11 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
     elevation: 0,
     transform: [{ translateY: 2 }],
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

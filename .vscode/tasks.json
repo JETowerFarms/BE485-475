@@ -2,9 +2,24 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Start Expo",
+			"label": "Start Metro",
 			"type": "shell",
-			"command": "npx expo start",
+			"command": "npm start",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "none"
+		},
+		{
+			"label": "Restart Backend (3001)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"$conn = Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue | Select-Object -First 1; if ($conn) { Write-Host \"Stopping PID $($conn.OwningProcess) on port 3001\"; Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 400 }; Set-Location 'o:\\N\\OptimizationTool\\backend'; npm start"
+			],
 			"isBackground": true,
 			"problemMatcher": [],
 			"group": "none"
