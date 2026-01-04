@@ -16,7 +16,8 @@ import {
   Pressable,
 } from 'react-native';
 import Svg, { Path, G } from 'react-native-svg';
-import mcdData from '../data/michiganMCDFull.json';
+import { buildApiUrl } from '../config/apiConfig';
+import { saveLocation } from '../utils/locationStorage';
 
 const SVG_WIDTH = 400;
 const SVG_HEIGHT = 400;
@@ -160,17 +161,22 @@ const assignCityColorsFromGeoJSON = (features) => {
   return colorMap;
 };
 
-const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
+const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: propIsLoading, onNavigateBack, onNavigateToPin }) => {
   const [selectedCity, setSelectedCity] = useState(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [mapDimensions, setMapDimensions] = useState({ width: 300, height: 300 });
   const [displayScale, setDisplayScale] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
+  
+  // Use prop data directly
+  const mcdData = propMcdData;
+  const isLoading = propIsLoading || !propMcdData;
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const translateXAnim = useRef(new Animated.Value(0)).current;
   const translateYAnim = useRef(new Animated.Value(0)).current;
+
+  const handleTapRef = useRef(null);
 
   const scale = useRef(1);
   const translateX = useRef(0);
@@ -215,18 +221,22 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
 
   const countyMCDs = useMemo(() => {
     if (!county || !mcdData || !mcdData.features) return [];
-    return mcdData.features.filter(
+    const filtered = mcdData.features.filter(
       (f) => f.properties.county?.toLowerCase() === county.toLowerCase() &&
              f.properties.name !== 'County subdivisions not defined' &&
              f.properties.aland > 0 // Exclude water-only features
     );
-  }, [county]);
+    console.log('CitySelectionScreen: Filtered MCDs for county', county, ':', filtered.length);
+    return filtered;
+  }, [county, mcdData]);
 
   const cityList = useMemo(() => {
-    return countyMCDs
+    const list = countyMCDs
       .map((f) => f.properties.namelsad || f.properties.name)
       .filter(Boolean)
       .sort();
+    console.log('CitySelectionScreen: City list:', list.length, 'cities');
+    return list;
   }, [countyMCDs]);
 
   const filteredCities = useMemo(() => {
@@ -249,6 +259,7 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
       }
     });
     if (minX === Infinity) return null;
+    console.log('Bounds computed:', { minX, minY, maxX, maxY });
     return { minX, minY, maxX, maxY };
   }, [countyMCDs]);
 
@@ -287,6 +298,10 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
   }, [geoToSvg]);
 
   const cityPolygons = useMemo(() => {
+    if (!bounds) {
+      console.log('cityPolygons: bounds not ready yet');
+      return [];
+    }
     const polygons = countyMCDs.map((feature) => {
       const cityName = feature.properties.namelsad || feature.properties.name;
       const geometry = feature.geometry;
@@ -311,38 +326,42 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
       return { name: cityName, polygons: allPolygons, area: totalArea };
     });
     // Sort by area ascending - smallest cities first for hit testing priority
+    console.log('CityPolygons computed:', polygons.length, 'polygons');
     return polygons.sort((a, b) => a.area - b.area);
-  }, [countyMCDs, geoToSvg]);
+  }, [countyMCDs, geoToSvg, bounds]);
 
   // Compute color assignments for cities (4-color theorem) using raw GeoJSON coordinates
   const [cityColorMap, setCityColorMap] = useState({});
+  const [isComputingColors, setIsComputingColors] = useState(false);
   
   useEffect(() => {
     if (countyMCDs.length === 0) {
-      setIsLoading(false);
       return;
     }
     
-    setIsLoading(true);
+    setIsComputingColors(true);
     // Use setTimeout to allow the loading indicator to render before heavy computation
     const timeoutId = setTimeout(() => {
       const colors = assignCityColorsFromGeoJSON(countyMCDs);
       setCityColorMap(colors);
-      setIsLoading(false);
+      setIsComputingColors(false);
     }, 50);
     
     return () => clearTimeout(timeoutId);
   }, [countyMCDs]);
 
   const findCityAtPoint = useCallback((svgX, svgY) => {
+    console.log('findCityAtPoint called with:', svgX, svgY, '| cityPolygons.length:', cityPolygons.length);
     for (const city of cityPolygons) {
       // Check ALL polygons for this city (handles MultiPolygon)
       for (const polygon of city.polygons) {
         if (pointInPolygon({ x: svgX, y: svgY }, polygon)) {
+          console.log('Found city:', city.name);
           return city.name;
         }
       }
     }
+    console.log('No city found at point');
     return null;
   }, [cityPolygons]);
 
@@ -441,10 +460,12 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
     return () => { element.removeEventListener?.('wheel', handleWheel); };
   }, [mapDimensions, handleWheel]);
 
-  const handleTap = (x, y) => {
+  const handleTap = useCallback((x, y) => {
     const doHitTest = () => {
       const { svgX, svgY } = screenToSvg(x, y);
+      console.log('Tap at screen:', x, y, '=> SVG:', svgX, svgY);
       const cityName = findCityAtPoint(svgX, svgY);
+      console.log('City found:', cityName);
       if (cityName) {
         setSelectedCity(prev => prev === cityName ? null : cityName);
       }
@@ -460,7 +481,12 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
     } else {
       doHitTest();
     }
-  };
+  }, [findCityAtPoint]);
+
+  // Store handleTap in ref so PanResponder always has latest version
+  useEffect(() => {
+    handleTapRef.current = handleTap;
+  }, [handleTap]);
 
   const getDistance = (touches) => {
     if (touches.length < 2) return 0;
@@ -574,7 +600,7 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
             resetZoom();
             gs.lastTapTime = 0;
           } else {
-            handleTap(endX, endY);
+            handleTapRef.current?.(endX, endY);
             gs.lastTapTime = now;
             gs.lastTapX = endX;
             gs.lastTapY = endY;
@@ -599,13 +625,53 @@ const CitySelectionScreen = ({ county, onNavigateBack, onNavigateToPin }) => {
     setSearchText('');
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (selectedCity && onNavigateToPin) {
+      // Save location before navigating
+      await saveLocation(county, selectedCity);
       onNavigateToPin(selectedCity);
     }
   };
 
   const { width: MAP_WIDTH, height: MAP_HEIGHT } = mapDimensions;
+
+  // Show loading state while data is being fetched
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+        <Pressable 
+          style={({ pressed }) => [styles.backArrowButton, pressed && styles.backArrowButtonPressed]}
+          onPress={onNavigateBack}
+        >
+          <Text style={styles.backArrowText}>←</Text>
+        </Pressable>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.text} />
+          <Text style={styles.loadingText}>Loading map data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show error state if data failed to load
+  if (!mcdData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+        <Pressable 
+          style={({ pressed }) => [styles.backArrowButton, pressed && styles.backArrowButtonPressed]}
+          onPress={onNavigateBack}
+        >
+          <Text style={styles.backArrowText}>←</Text>
+        </Pressable>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Unable to load map data</Text>
+          <Text style={styles.errorSubtext}>Please check your connection and try again</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1013,6 +1079,37 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
     elevation: 0,
     transform: [{ translateY: 2 }],
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    fontSize: 14,
+    color: COLORS.text,
+    textAlign: 'center',
+    opacity: 0.7,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: COLORS.text,
+    textAlign: 'center',
+    marginTop: 16,
   },
 });
 

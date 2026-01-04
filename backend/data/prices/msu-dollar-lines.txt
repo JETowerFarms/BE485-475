@@ -1,0 +1,65 @@
+Title: 2026 Michigan State University Custom Work Rates.xlsm
+Pages: 2
+Total parsed lines: 73
+Lines containing '$': 58
+Source URL: https://www.canr.msu.edu/farm_management/uploads/files/2026%20Custom%20Work%20Summary%20v2%20-%20FINAL.pdf
+
+---
+4: Chisel Plow 23 Ft19.81$ 1.94$ 17.88$
+5: Chisel Plow 37 Ft17.36$ 1.20$ 16.16$
+6: Chisel Plow 57 Ft15.69$ 0.78$ 14.91$
+7: Chisel Plow, Front Dsk 16.3 Ft21.12$ 2.74$ 18.38$
+8: Chisel Plow, Front Dsk 21.3 Ft Fold22.81$ 2.10$ 20.72$
+9: Moldboard Plow 6 Bottom-18, 9 Ft31.53$ 5.50$ 26.03$
+10: Moldboard Plow 8 Bottom-18, 12 Ft28.30$ 4.12$ 24.17$
+11: Field Cultivator 23 Ft8.51$ 1.38$ 7.13$
+12: Field Cultivator 47 Ft8.88$ 0.68$ 8.20$
+13: Field Cultivator 60 Ft7.97$ 0.53$ 7.44$
+14: Tandem Disk 21 Ft Fold17.60$ 1.88$ 15.72$
+15: Tandem Disk 30 Ft Fold19.04$ 1.31$ 17.73$
+16: V-Ripper 25 "O.C., 10 Ft21.51$ 3.71$ 17.80$
+17: V-Ripper 30 "O.C., 17 Ft19.13$ 2.18$ 16.94$
+19: Row Crop Planter 6 Row-30, 15 Ft17.60$ 5.53$ 12.07$
+20: Row Crop Planter 8 Row-30, 20 Ft15.75$ 4.15$ 11.61$
+21: Row Crop Planter 12 Row-30, 30 Ft19.85$ 2.77$ 17.08$
+22: Row Crop Planter 16 Row-30, 40 Ft22.35$ 2.07$ 20.28$
+23: Row Crop Planter 24 Row-30, 60 Ft22.54$ 1.38$ 21.15$
+24: Presswheel Drill 16 Ft20.21$ 5.46$ 14.76$
+25: Presswheel Drill 20 Ft19.28$ 4.37$ 14.91$
+26: Presswheel Drill 25 Ft19.67$ 3.49$ 16.18$
+27: Presswheel Drill 30 Ft19.11$ 2.91$ 16.20$
+28: Air Seeder Drill w/Cart 52 Ft31.96$ 1.68$ 30.29$
+30: $ 5.82$ 30.10$
+32: Row Cultivator 12 Row-30, 30 Ft10.34$ 1.51$ 8.82$
+33: Boom Sprayer, Self-Propelled 120 Ft9.62$ 0.63$ 8.99$
+34: Boom Sprayer, Pull-Type 90 Ft6.60$ 0.91$ 5.70$
+40: Rotary Mower/Conditioner 12 Ft12.20$ 2.71$ 9.49$
+41: Hay Rake 30 Ft3.04$ 0.88$ 2.16$
+42: Hay Merger 14 Ft9.49$ 2.11$ 7.38$
+43: Hay Merger 34 Ft10.30$ 0.87$ 9.43$
+44: Hay Baler PTO Twine 12 Ft19.84$ 8.49$ 11.35$
+45: Round Baler w/Bale Wrap 5x6 , 20 Ft20.88$ 2.43$ 18.46$
+46: Large Rectangular Baler 3x3 , 20 Ft17.43$ 3.18$ 14.25$
+47: Large Rectangular Baler 4x3 , 20 Ft19.41$ 3.18$ 16.22$
+48: Forage Harvester, Pull-Type w/Corn Head 3 Row, 7.5 Ft84.24$ 17.92$ 66.33$
+49: Forage Harvester, Pull-Type w/Pickup Head 12 Ft41.49$ 11.20$ 30.29$
+50: Forage Harvester, Self-Prop Corn Head 6 Row, 15 Ft63.56$ 7.28$ 56.28$
+51: Forage Harvester, Self-Prop Corn Head 8 Row, 20 Ft49.52$ 5.46$ 44.06$
+52: Forage Harvester, Self-Prop Pickup Head 12 Ft60.38$ 9.10$ 51.28$
+53: Forage Harvester, Self-Prop Pickup Head (2X windrows) 24 Ft36.46$ 4.55$ 31.92$
+54: Combine Platform 20 Ft54.31$ 6.24$ 48.07$
+55: Combine Platform 25 Ft51.33$ 4.99$ 46.34$
+56: Combine Platform 30 Ft43.31$ 4.16$ 39.15$
+57: Combine Corn Hd 6 Row-30, 15 Ft67.07$ 7.28$ 59.79$
+58: Combine Corn Hd 8 Row-30, 20 Ft52.13$ 5.46$ 46.67$
+59: Combine Chopping Corn Hd 8 Row-30, 20 Ft58.65$ 5.46$ 53.19$
+60: Combine Corn Hd 12 Row-30, 30 Ft42.84$ 3.64$ 39.21$
+61: Combine Corn Hd 12 Row-22, 22 Ft58.26$ 4.96$ 53.29$
+62: Combine Chopping Corn Hd 12 Row-30, 30 Ft50.98$ 3.64$ 47.34$
+63: Combine Chopping Corn Hd 12 Row-22, 22 Ft69.07$ 4.96$ 64.10$
+64: Combine Belt Pickup Hd 23 Ft45.49$ 4.75
+65: $ 40.74$
+66: Grain Cart 30 Ft37.42$ 3.63$ 33.79$
+67: Sugar Beet Harvester, Self-Propelled 15 Ft197.07$ 5.40$ 191.67$
+68: Sugar Beet Harvester, Pull-Type 15 Ft130.00$ 8.83$ 121.17$
+69: Stalk Shredder 20 Ft18.40$ 3.19$ 15.21$

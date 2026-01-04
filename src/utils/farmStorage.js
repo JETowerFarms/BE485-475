@@ -28,8 +28,29 @@ export const loadFarms = async () => {
  */
 export const saveFarms = async (farmsData) => {
   try {
-    await AsyncStorage.setItem(FARMS_STORAGE_KEY, JSON.stringify(farmsData));
-    console.log(`Saved ${farmsData.length} farms to storage`);
+    // Strip out heavy heat map grid data to avoid storage limits
+    // Heat maps will be regenerated from backend when viewing farm
+    const lightweightFarms = farmsData.map(farm => {
+      const { backendAnalysis, ...farmWithoutAnalysis } = farm;
+      
+      if (backendAnalysis) {
+        // Keep only metadata, remove heavy grid data
+        return {
+          ...farmWithoutAnalysis,
+          backendAnalysis: {
+            metadata: backendAnalysis.metadata,
+            dataPointCount: backendAnalysis.dataPointCount,
+            processingTimeMs: backendAnalysis.processingTimeMs,
+            // Omit solarHeatMapGrid and elevationHeatMapGrid - too large
+          }
+        };
+      }
+      
+      return farm;
+    });
+    
+    await AsyncStorage.setItem(FARMS_STORAGE_KEY, JSON.stringify(lightweightFarms));
+    console.log(`Saved ${lightweightFarms.length} farms to storage (without heat map grids)`);
     return true;
   } catch (error) {
     console.error('Error saving farms:', error);

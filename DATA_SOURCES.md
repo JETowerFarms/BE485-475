@@ -3,11 +3,8 @@ All data used in the application - verified sources only
 
 ## ACTIVE DATA FILES (Currently Imported and Used)
 
-### 1. michiganSolarSuitability.json
-**File:** `src/data/michiganSolarSuitability.json`
-**Size:** 12.9 MB (12,948,317 bytes)
-**Generated:** November 28, 2025 at 11:35 AM
-**Source Script:** `process_all_real_data.py`
+### 1. Solar suitability data
+**Source:** Backend database (`solar_suitability` table)
 
 **Real Data Sources:**
 - **Land Cover:** NLCD 2024 Land Cover Raster
@@ -41,7 +38,7 @@ All data used in the application - verified sources only
 - Population weight: 1
 - Overall score = (sum of weighted scores) / 10
 
-**Grid Coverage:** 133,980 sample points across Michigan (0.02° resolution ~2km)
+**Grid Coverage:** Stored in the backend database and queried by API
 
 **STATUS:** ✅ 100% REAL DATA - No estimates or fake data
 

@@ -12,9 +12,13 @@ import {
   ScrollView,
   FlatList,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import CrossPlatformMap from '../components/CrossPlatformMap';
-import mcdData from '../data/michiganMCDFull.json';
+import { buildApiUrl } from '../config/apiConfig';
+
+const concaveman = require('concaveman');
 
 const COLORS = {
   background: '#F5F0E6',
@@ -66,7 +70,169 @@ const calculateRingArea = (ring) => {
   return Math.abs(area / 2);
 };
 
-const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext, onFarmsUpdate }) => {
+const degToRad = (deg) => (deg * Math.PI) / 180;
+
+// Convert lat/lng to a local planar coordinate system (meters-ish) for stable hull math.
+const toLocalXY = (pins) => {
+  const lat0 = pins.reduce((acc, p) => acc + p.latitude, 0) / Math.max(pins.length, 1);
+  const lng0 = pins.reduce((acc, p) => acc + p.longitude, 0) / Math.max(pins.length, 1);
+  const latRad = degToRad(lat0);
+  const metersPerDegLat = 110540; // rough
+  const metersPerDegLng = 111320 * Math.cos(latRad); // rough
+
+  const xy = pins.map((p) => {
+    const x = (p.longitude - lng0) * metersPerDegLng;
+    const y = (p.latitude - lat0) * metersPerDegLat;
+    return { x, y };
+  });
+
+  return { lat0, lng0, xy };
+};
+
+const pointToSegmentDistanceSq = (px, py, ax, ay, bx, by) => {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+
+  const abLenSq = abx * abx + aby * aby;
+  if (abLenSq === 0) {
+    const dx = px - ax;
+    const dy = py - ay;
+    return { distSq: dx * dx + dy * dy, t: 0 };
+  }
+
+  let t = (apx * abx + apy * aby) / abLenSq;
+  if (t < 0) t = 0;
+  if (t > 1) t = 1;
+
+  const cx = ax + t * abx;
+  const cy = ay + t * aby;
+  const dx = px - cx;
+  const dy = py - cy;
+  return { distSq: dx * dx + dy * dy, t };
+};
+
+const cross = (ax, ay, bx, by) => ax * by - ay * bx;
+
+const segmentsIntersect = (a, b, c, d) => {
+  // Proper segment intersection (including collinear overlaps treated as intersecting)
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const acx = c.x - a.x;
+  const acy = c.y - a.y;
+  const adx = d.x - a.x;
+  const ady = d.y - a.y;
+
+  const cdx = d.x - c.x;
+  const cdy = d.y - c.y;
+  const cax = a.x - c.x;
+  const cay = a.y - c.y;
+  const cbx = b.x - c.x;
+  const cby = b.y - c.y;
+
+  const d1 = cross(abx, aby, acx, acy);
+  const d2 = cross(abx, aby, adx, ady);
+  const d3 = cross(cdx, cdy, cax, cay);
+  const d4 = cross(cdx, cdy, cbx, cby);
+
+  const eps = 1e-9;
+  const s1 = Math.abs(d1) < eps ? 0 : Math.sign(d1);
+  const s2 = Math.abs(d2) < eps ? 0 : Math.sign(d2);
+  const s3 = Math.abs(d3) < eps ? 0 : Math.sign(d3);
+  const s4 = Math.abs(d4) < eps ? 0 : Math.sign(d4);
+
+  const onSegment = (p, q, r) => {
+    // q on pr
+    return (
+      Math.min(p.x, r.x) - eps <= q.x &&
+      q.x <= Math.max(p.x, r.x) + eps &&
+      Math.min(p.y, r.y) - eps <= q.y &&
+      q.y <= Math.max(p.y, r.y) + eps
+    );
+  };
+
+  if (s1 === 0 && onSegment(a, c, b)) return true;
+  if (s2 === 0 && onSegment(a, d, b)) return true;
+  if (s3 === 0 && onSegment(c, a, d)) return true;
+  if (s4 === 0 && onSegment(c, b, d)) return true;
+
+  return s1 !== s2 && s3 !== s4;
+};
+
+// Returns an array of pin indexes in boundary order (no closing point).
+// Robust strategy:
+// 1) dedupe near-identical points
+// 2) centroid-angle sort
+// 3) 2-opt untangling to remove self-intersections
+const orderPinIndexesForPolygon = (pins) => {
+  if (!Array.isArray(pins) || pins.length < 3) return [];
+
+  // Dedupe near-identical pins (common when tapping corners repeatedly)
+  const keyToIndex = new Map();
+  const keptIndexes = [];
+  for (let i = 0; i < pins.length; i++) {
+    const p = pins[i];
+    const key = `${p.latitude.toFixed(7)},${p.longitude.toFixed(7)}`;
+    if (keyToIndex.has(key)) continue;
+    keyToIndex.set(key, i);
+    keptIndexes.push(i);
+  }
+  if (keptIndexes.length < 3) return [];
+
+  const keptPins = keptIndexes.map((i) => pins[i]);
+  const { xy } = toLocalXY(keptPins);
+
+  // Initial order: sort by angle around centroid
+  const cx = xy.reduce((acc, p) => acc + p.x, 0) / xy.length;
+  const cy = xy.reduce((acc, p) => acc + p.y, 0) / xy.length;
+  let order = xy
+    .map((p, localIdx) => ({ localIdx, a: Math.atan2(p.y - cy, p.x - cx) }))
+    .sort((a, b) => a.a - b.a)
+    .map((v) => v.localIdx);
+
+  // 2-opt: remove edge crossings by reversing segments
+  const maxPasses = 200;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let improved = false;
+    const n = order.length;
+    for (let i = 0; i < n; i++) {
+      const i2 = (i + 1) % n;
+      const a = xy[order[i]];
+      const b = xy[order[i2]];
+
+      for (let j = i + 2; j < n; j++) {
+        const j2 = (j + 1) % n;
+        // Skip adjacent edges and the edge that shares the start/end vertex
+        if (i === 0 && j2 === 0) continue;
+        if (i2 === j) continue;
+
+        const c = xy[order[j]];
+        const d = xy[order[j2]];
+        if (segmentsIntersect(a, b, c, d)) {
+          // Reverse the segment between i2 and j
+          const start = i2;
+          const end = j;
+          const next = order.slice();
+          const segment = [];
+          for (let k = start; k <= end; k++) segment.push(next[k]);
+          segment.reverse();
+          for (let k = start; k <= end; k++) next[k] = segment[k - start];
+          order = next;
+          improved = true;
+        }
+        if (improved) break;
+      }
+      if (improved) break;
+    }
+    if (!improved) break;
+  }
+
+  // Map back to original pin indexes
+  return order.map((localIdx) => keptIndexes[localIdx]);
+};
+
+const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propIsLoading, initialFarms, onNavigateBack, onNavigateNext, onFarmsUpdate }) => {
   const [pins, setPins] = useState([]);
   const [farmPins, setFarmPins] = useState(() => {
     // Initialize farmPins from initialFarms if provided
@@ -77,6 +243,10 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
   });
   const [farms, setFarms] = useState(initialFarms || []);
   const [backPressed, setBackPressed] = useState(false);
+  
+  // Use prop data directly
+  const mcdData = propMcdData;
+  const isLoadingMcdData = propIsLoading || !propMcdData;
   
   // Modal states
   const [farmsModalVisible, setFarmsModalVisible] = useState(false);
@@ -97,7 +267,7 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
 
   // Find the selected city data and calculate centroid
   const cityData = useMemo(() => {
-    if (!city || !county) return null;
+    if (!city || !county || !mcdData) return null;
     
     const feature = mcdData.features.find(f => 
       f.properties.namelsad === city && 
@@ -157,21 +327,84 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
     );
   };
 
-  const handleBuildFarm = () => {
+  const handleBuildFarm = async () => {
     if (pins.length < 3) {
       // Need at least 3 points to make a polygon
       return;
     }
-    
-    // Store the farm polygon coordinates in GeoJSON format
-    const coordinates = pins.map(pin => [pin.longitude, pin.latitude]);
+
+    // Connect-the-dots: preserve the user's pin placement order.
+    const orderedPins = pins;
+
+    // Store the farm polygon coordinates in GeoJSON format (ring)
+    const coordinates = orderedPins.map((pin) => [pin.longitude, pin.latitude]);
     // Close the polygon by adding the first point at the end
     coordinates.push(coordinates[0]);
     
     const farmId = Date.now().toString();
     
+    // Fetch analysis data from backend - REQUIRED for all farms
+    let backendAnalysis = null;
+    try {
+      const response = await fetch(buildApiUrl('/farms/analyze'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ farmId, coordinates, county, city })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Backend API error (${response.status}): ${errorText}`);
+      }
+      
+      backendAnalysis = await response.json();
+      
+      // Import SOLAR_DATA_CACHE from FarmDescriptionScreen
+      const { SOLAR_DATA_CACHE } = require('../screens/FarmDescriptionScreen');
+      
+      // Pre-populate SOLAR_DATA_CACHE with backend results
+      if (backendAnalysis.solarDataPoints) {
+        backendAnalysis.solarDataPoints.forEach(point => {
+          const cacheKey = `${point.lat.toFixed(6)}_${point.lng.toFixed(6)}`;
+          SOLAR_DATA_CACHE.set(cacheKey, {
+            overall: point.overall,
+            land_cover: point.land_cover,
+            slope: point.slope,
+            transmission: point.transmission,
+            population: point.population,
+            score: point.overall,
+            substation: point.transmission
+          });
+        });
+        
+        console.log(`Backend analysis complete: ${backendAnalysis.dataPointCount} points in ${backendAnalysis.processingTimeMs}ms`);
+        console.log(`Avg suitability: ${backendAnalysis.metadata.avgSuitability}`);
+        console.log(`Solar grid: ${backendAnalysis.solarHeatMapGrid.width}x${backendAnalysis.solarHeatMapGrid.height}, ${backendAnalysis.solarHeatMapGrid.cells.length} cells`);
+        console.log(`Elevation grid: ${backendAnalysis.elevationHeatMapGrid.width}x${backendAnalysis.elevationHeatMapGrid.height}, ${backendAnalysis.elevationHeatMapGrid.cells.length} cells`);
+      }
+    } catch (error) {
+      console.error('Backend API call failed:', error);
+      Alert.alert(
+        'Cannot Build Farm',
+        `Failed to analyze farm data from backend server.\n\nError: ${error.message}\n\nPlease ensure the backend server is running on port 3001.`,
+        [{ text: 'OK' }]
+      );
+      return; // Don't create farm without backend data
+    }
+    
+    // Validate backend data structure
+    if (!backendAnalysis?.solarHeatMapGrid || !backendAnalysis?.elevationHeatMapGrid) {
+      console.error('Invalid backend response:', backendAnalysis);
+      Alert.alert(
+        'Invalid Backend Data',
+        'The backend returned incomplete data. Missing heat map grids.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
     // Convert current pins to blue farm pins
-    const bluePins = pins.map(pin => ({
+    const bluePins = orderedPins.map((pin) => ({
       ...pin,
       color: '#3B82F6', // Blue color for farm pins
       farmId: farmId,
@@ -185,13 +418,15 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
         county: county,
         city: city,
         createdAt: new Date().toISOString(),
-        pinCount: pins.length,
+        pinCount: orderedPins.length,
+        avgSuitability: backendAnalysis.metadata.avgSuitability, // Required from backend
       },
       geometry: {
         type: 'Polygon',
         coordinates: [coordinates],
       },
       pins: bluePins, // Store the pins with the farm
+      backendAnalysis, // Store complete backend analysis (validated above)
     };
     
     setFarmPins(currentFarmPins => [...currentFarmPins, ...bluePins]);
@@ -277,9 +512,8 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
     
     if (isNaN(newLat) || isNaN(newLng)) return;
     
-    // Update the farm pin
-    const farmPinsForThis = getFarmPinsById(selectedFarm.id);
-    const pinToUpdate = farmPinsForThis[editingPinIndex];
+    // Update the farm pin (use selectedFarm.pins order; don't rely on farmPins ordering)
+    const pinToUpdate = (selectedFarm.pins || [])[editingPinIndex];
     
     if (pinToUpdate) {
       setFarmPins(currentFarmPins => currentFarmPins.map(p => {
@@ -296,28 +530,30 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
       // Also update the farm geometry and pins
       setFarms(currentFarms => currentFarms.map(f => {
         if (f.id === selectedFarm.id) {
-          const newCoords = [...f.geometry.coordinates[0]];
-          newCoords[editingPinIndex] = [newLng, newLat];
-          // Update closing point if editing first point
-          if (editingPinIndex === 0) {
-            newCoords[newCoords.length - 1] = [newLng, newLat];
-          }
-          // Update pins array
-          const newPins = f.pins ? [...f.pins] : [];
-          if (newPins[editingPinIndex]) {
-            newPins[editingPinIndex] = {
-              ...newPins[editingPinIndex],
+          // Update pins array (vertex list) in-place (connect-the-dots order)
+          const updatedPins = f.pins ? [...f.pins] : [];
+          if (updatedPins[editingPinIndex]) {
+            updatedPins[editingPinIndex] = {
+              ...updatedPins[editingPinIndex],
               latitude: newLat,
               longitude: newLng,
             };
           }
+
+          const newCoords = updatedPins.map((p) => [p.longitude, p.latitude]);
+          if (newCoords.length) newCoords.push(newCoords[0]);
+
           return {
             ...f,
+            properties: {
+              ...f.properties,
+              pinCount: updatedPins.length,
+            },
             geometry: {
               ...f.geometry,
               coordinates: [newCoords],
             },
-            pins: newPins,
+            pins: updatedPins,
           };
         }
         return f;
@@ -325,17 +561,29 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
       
       // Also update selectedFarm to show updated coordinates in UI
       setSelectedFarm(prev => {
-        const newCoords = [...prev.geometry.coordinates[0]];
-        newCoords[editingPinIndex] = [newLng, newLat];
-        if (editingPinIndex === 0) {
-          newCoords[newCoords.length - 1] = [newLng, newLat];
+        const updatedPins = prev.pins ? [...prev.pins] : [];
+        if (updatedPins[editingPinIndex]) {
+          updatedPins[editingPinIndex] = {
+            ...updatedPins[editingPinIndex],
+            latitude: newLat,
+            longitude: newLng,
+          };
         }
+
+        const newCoords = updatedPins.map((p) => [p.longitude, p.latitude]);
+        if (newCoords.length) newCoords.push(newCoords[0]);
+
         return {
           ...prev,
+          properties: {
+            ...prev.properties,
+            pinCount: updatedPins.length,
+          },
           geometry: {
             ...prev.geometry,
             coordinates: [newCoords],
           },
+          pins: updatedPins,
         };
       });
     }
@@ -347,6 +595,54 @@ const MapScreen = ({ county, city, initialFarms, onNavigateBack, onNavigateNext,
   const handleCancelPinEdit = () => {
     setEditingPinIndex(null);
   };
+
+  // Show loading state
+  if (isLoadingMcdData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+        <Pressable
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.backButtonPressed,
+          ]}
+          onPress={onNavigateBack}
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </Pressable>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.buttonBg} />
+          <Text style={styles.loadingText}>Loading map data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show error state if data failed to load
+  if (!mcdData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+        <Pressable
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.backButtonPressed,
+          ]}
+          onPress={onNavigateBack}
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </Pressable>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>{city}</Text>
+          <Text style={styles.headerSubtitle}>{county} County</Text>
+        </View>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Unable to load map data</Text>
+          <Text style={styles.errorSubtext}>Please check your connection and try again</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <>
@@ -1251,6 +1547,35 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    fontSize: 14,
+    color: COLORS.text,
+    textAlign: 'center',
+    opacity: 0.7,
   },
 });
 export default MapScreen;

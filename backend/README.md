@@ -396,9 +396,8 @@ psql -h localhost -U postgres -d michigan_solar
 ```
 
 ### Import fails
-- Ensure 30x30 grid file exists at `../src/data/michiganSolarSuitability_30x30.json`
-- Check available disk space (need ~15GB during import)
-- Verify PostgreSQL has sufficient memory
+- Verify the `solar_suitability` table is populated in your database
+- Check available disk space and PostgreSQL memory settings for large datasets
 
 ### API returns 500 errors
 - Check server logs

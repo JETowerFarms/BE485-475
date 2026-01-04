@@ -57,7 +57,6 @@ const sourceFiles = [
   'src/routes/farms.js',
   'src/routes/geo.js',
   'scripts/setup-database.js',
-  'scripts/import-solar-data.js',
   'DATABASE_SCHEMA.sql',
 ];
 
@@ -76,8 +75,7 @@ if (allPresent) {
   console.log('1. Update .env with your PostgreSQL password');
   console.log('2. Install PostgreSQL with PostGIS extension');
   console.log('3. Run: npm run db:setup');
-  console.log('4. Run: npm run db:import (30-45 minutes)');
-  console.log('5. Run: npm run dev');
+  console.log('4. Run: npm run dev');
 } else {
   console.log('❌ Some modules are missing. Run: npm install');
 }

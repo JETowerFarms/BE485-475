@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { loadFarms as loadFarmsFromStorage, saveFarms as saveFarmsToStorage } from './src/utils/farmStorage';
+import { buildApiUrl } from './src/config/apiConfig';
 import HomeScreen from './src/screens/HomeScreen';
 import CitySelectionScreen from './src/screens/CitySelectionScreen';
 import MapScreen from './src/screens/MapScreen';
@@ -17,6 +18,9 @@ export default function App() {
   const [selectedCity, setSelectedCity] = useState(null);
   const [farms, setFarms] = useState([]);
   const [isLoadingFarms, setIsLoadingFarms] = useState(true);
+  const [mcdData, setMcdData] = useState(null);
+  const [isLoadingMcdData, setIsLoadingMcdData] = useState(false);
+  const [hasAutoNavigated, setHasAutoNavigated] = useState(false);
 
   // Load farms from storage on app start
   useEffect(() => {
@@ -28,15 +32,45 @@ export default function App() {
     initializeFarms();
   }, []);
 
+  // Load MCD data once when needed
+  useEffect(() => {
+    if ((currentScreen === 'citySelection' || currentScreen === 'map') && !mcdData && !isLoadingMcdData) {
+      const fetchMcdData = async () => {
+        try {
+          setIsLoadingMcdData(true);
+          const response = await fetch(buildApiUrl('/geo/michigan-mcd'));
+          if (!response.ok) {
+            throw new Error('Failed to fetch MCD data');
+          }
+          const data = await response.json();
+          console.log('App: MCD data loaded:', data.features?.length, 'features');
+          setMcdData(data);
+        } catch (error) {
+          console.error('App: Error fetching MCD data:', error);
+        } finally {
+          setIsLoadingMcdData(false);
+        }
+      };
+      fetchMcdData();
+    }
+  }, [currentScreen, mcdData, isLoadingMcdData]);
+
   // Update farms state and persist to storage
   const updateFarms = async (farmsData) => {
     setFarms(farmsData);
     await saveFarmsToStorage(farmsData);
   };
 
-  const handleNavigateToCity = (county) => {
+  const handleNavigateToCity = (county, city = null) => {
     setSelectedCounty(county);
-    setCurrentScreen('citySelection');
+    setHasAutoNavigated(true); // Mark that we've navigated (disable future auto-nav)
+    if (city) {
+      // Auto-navigate directly to map if city is provided
+      setSelectedCity(city);
+      setCurrentScreen('map');
+    } else {
+      setCurrentScreen('citySelection');
+    }
   };
 
   const handleNavigateToPin = (county, city) => {
@@ -79,13 +113,18 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StatusBar style="dark" />
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       {currentScreen === 'home' && (
-        <HomeScreen onNavigateToCity={handleNavigateToCity} />
+        <HomeScreen 
+          onNavigateToCity={handleNavigateToCity}
+          shouldAutoNavigate={!hasAutoNavigated}
+        />
       )}
       {currentScreen === 'citySelection' && selectedCounty && (
         <CitySelectionScreen 
-          county={selectedCounty} 
+          county={selectedCounty}
+          mcdData={mcdData}
+          isLoadingMcdData={isLoadingMcdData}
           onNavigateBack={handleBackToHome}
           onNavigateToPin={(city) => handleNavigateToPin(selectedCounty, city)}
         />
@@ -94,6 +133,8 @@ export default function App() {
         <MapScreen
           county={selectedCounty}
           city={selectedCity}
+          mcdData={mcdData}
+          isLoadingMcdData={isLoadingMcdData}
           initialFarms={farms}
           onNavigateBack={handleBackToCitySelection}
           onNavigateNext={handleNavigateToFarmDescription}

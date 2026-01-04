@@ -7,6 +7,7 @@ import {
   StatusBar,
   Pressable,
   Platform,
+  Image,
   TextInput,
   ScrollView,
   KeyboardAvoidingView,
@@ -24,31 +25,29 @@ import { interpolate } from 'react-native-reanimated';
 import { contours } from 'd3-contour';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point as turfPoint, polygon as turfPolygon } from '@turf/helpers';
+import { buildApiUrl } from '../config/apiConfig';
 
-// API-based solar suitability data access (30x30 grid - 120M points at 0.96 acres/cell)
-// Instead of loading 11GB JSON, we fetch only the coordinates we need
+// Solar suitability data cache (pre-populated by backend batch fetch in MapScreen)
+// Data is fetched when farm is built, not on-demand during rendering
 const SOLAR_GRID_SPACING = 0.000667; // degrees between points in 30x30 grid
-const SOLAR_DATA_CACHE = new Map(); // Cache fetched data points
+export const SOLAR_DATA_CACHE = new Map(); // Cache for pre-fetched data points
 
-// Coordinate-based data fetcher (simulates API - replace with actual fetch when backend ready)
-const fetchSolarDataPoint = async (lat, lng) => {
-  // Round to grid coordinates
-  const latKey = lat.toFixed(6);
-  const lngKey = lng.toFixed(6);
-  const cacheKey = `${latKey}_${lngKey}`;
-  
-  // Check cache
-  if (SOLAR_DATA_CACHE.has(cacheKey)) {
-    return SOLAR_DATA_CACHE.get(cacheKey);
+// Dev-only: probe external connectivity for map/satellite assets.
+const runNetworkProbe = async () => {
+  const leafletUrl = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  const esriTileUrl = 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0';
+  try {
+    const res = await fetch(leafletUrl, { method: 'GET' });
+    console.log('[NetProbe] Leaflet fetch:', res.status, res.ok);
+  } catch (e) {
+    console.error('[NetProbe] Leaflet fetch failed:', e?.message || e);
   }
-  
-  // TODO: Replace with actual API call when backend is ready
-  // For now, return null (will trigger fallback to nearest neighbor from old dataset)
-  // Example API structure:
-  // const response = await fetch(`/api/solar/${latKey}/${lngKey}`);
-  // const data = await response.json();
-  
-  return null;
+  try {
+    const ok = await Image.prefetch(esriTileUrl);
+    console.log('[NetProbe] ESRI tile prefetch:', ok);
+  } catch (e) {
+    console.error('[NetProbe] ESRI tile prefetch failed:', e?.message || e);
+  }
 };
 
 const COLORS = {
@@ -97,6 +96,13 @@ const getStableFarmId = (farmId, coords) => {
     return `poly-${coords.length}-${toCoordKey(first)}-${toCoordKey(middle)}-${toCoordKey(last)}`;
   }
   return 'poly-unknown';
+};
+
+const formatUsd = (value) => {
+  if (value === null || value === undefined) return 'Unknown';
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return 'Unknown';
+  return `$${Math.round(num).toLocaleString()}`;
 };
 
 // Helper to normalize polygon coordinates to fit in a given size
@@ -270,16 +276,7 @@ const getSolarGradientColorForScore = (score) => {
 };
 
 // NOTE: Deleted getElevationColor function - no longer using fake elevation data
-
-// Helper to get solar suitability color based on score
-const getSolarColor = (score) => {
-  for (const range of SOLAR_COLORS) {
-    if (score >= range.min && score < range.max) {
-      return range.color;
-    }
-  }
-  return SOLAR_COLORS[SOLAR_COLORS.length - 1].color;
-};
+// NOTE: Deleted getSolarColor function - all farms now use backend-calculated colors
 
 // TURF.JS - Industry-standard point-in-polygon testing
 // Replaces faulty custom ray casting algorithm
@@ -365,11 +362,23 @@ const cellIntersectsPolygon = (cellBounds, polygon) => {
 // Interpret land cover score based on EGLE NLCD methodology
 // Scores are derived from NLCD 2021 land cover classifications
 const interpretLandCover = (landCoverScore) => {
+  const score = Number(landCoverScore);
+  if (!Number.isFinite(score) || score < 1) {
+    return {
+      type: 'Unknown / Not Yet Analyzed',
+      nlcdClasses: 'N/A',
+      description: 'Land cover data not available yet',
+      clearingCost: 'Unknown',
+      costLevel: 'high',
+      notes: 'This farm does not currently have land cover analysis. Ensure the backend server is running and re-open the farm to regenerate analysis.'
+    };
+  }
+
   // Based on Michigan EGLE Solar Energy Suitability Tool methodology
   // Reference: src/data/egle_scoring_methodology.json
   
   // Score 90: Barren Land, Grassland/Herbaceous, Pasture/Hay, Cultivated Crops (NLCD 31, 71, 81, 82)
-  if (landCoverScore >= 88) {
+  if (score >= 88) {
     return {
       type: 'Open Land (High Suitability)',
       nlcdClasses: 'Agricultural, Grassland, Pasture, or Barren Land',
@@ -380,7 +389,7 @@ const interpretLandCover = (landCoverScore) => {
     };
   }
   // Score 75: Developed Open Space, Shrub/Scrub (NLCD 21, 52)
-  else if (landCoverScore >= 73) {
+  else if (score >= 73) {
     return {
       type: 'Open Development / Shrubland',
       nlcdClasses: 'Developed Open Space or Shrub/Scrub',
@@ -391,7 +400,7 @@ const interpretLandCover = (landCoverScore) => {
     };
   }
   // Score 50: Low Intensity Development, Deciduous/Evergreen/Mixed Forest (NLCD 22, 41, 42, 43)
-  else if (landCoverScore >= 48) {
+  else if (score >= 48) {
     return {
       type: 'Forested / Low Development',
       nlcdClasses: 'Forest or Low-Intensity Development',
@@ -402,7 +411,7 @@ const interpretLandCover = (landCoverScore) => {
     };
   }
   // Score 25: Medium Intensity Development (NLCD 23)
-  else if (landCoverScore >= 23) {
+  else if (score >= 23) {
     return {
       type: 'Medium Development',
       nlcdClasses: 'Medium-Intensity Development',
@@ -413,7 +422,7 @@ const interpretLandCover = (landCoverScore) => {
     };
   }
   // Score 1: Open Water, Ice/Snow, High Intensity Development, Wetlands (NLCD 11, 12, 24, 90, 95)
-  else if (landCoverScore >= 1) {
+  else if (score >= 1) {
     return {
       type: 'Water / Wetland / Dense Urban',
       nlcdClasses: 'Water, Wetland, or High-Intensity Development',
@@ -423,6 +432,16 @@ const interpretLandCover = (landCoverScore) => {
       notes: 'May not be developable due to environmental or zoning restrictions'
     };
   }
+
+  // Should be unreachable due to early score validation, but keep a safe default.
+  return {
+    type: 'Unknown / Not Yet Analyzed',
+    nlcdClasses: 'N/A',
+    description: 'Land cover data not available yet',
+    clearingCost: 'Unknown',
+    costLevel: 'high',
+    notes: 'This farm does not currently have land cover analysis.'
+  };
 };
 
 // NOTE: Deleted fake getDetailedSolarScore and getElevationForCoord functions.
@@ -432,107 +451,6 @@ const interpretLandCover = (landCoverScore) => {
 // transmission lines (EIA 123,473 points), and population (GPW 2020).
 // Topological view now uses REAL slope data instead of synthetic sine/cosine waves.
 
-// Get solar suitability data for a coordinate using EGLE methodology
-// Note: 'overall' is the primary score in source data, 'score' is an alias for compatibility
-
-const interpolateSolarFields = (weights, samples) => {
-  // Note: source data uses 'overall' as the main score, not 'score'
-  // We interpolate the real fields and then derive 'score' from 'overall'
-  const fields = ['overall', 'land_cover', 'slope', 'transmission', 'population'];
-  const result = {};
-  fields.forEach(field => {
-    // All samples are guaranteed to exist when this function is called
-    const interpolated =
-      (samples.c00[field] ?? 0) * weights.w00 +
-      (samples.c10[field] ?? 0) * weights.w10 +
-      (samples.c01[field] ?? 0) * weights.w01 +
-      (samples.c11[field] ?? 0) * weights.w11;
-    result[field] = interpolated;
-  });
-  // Derive 'score' from 'overall' (the main suitability value in source data)
-  result.score = result.overall;
-  // Alias substation to transmission for backward compatibility
-  result.substation = result.transmission;
-  return result;
-};
-
-const getNearestValue = (value, sortedValues) => {
-  if (!sortedValues || sortedValues.length === 0) {
-    return value;
-  }
-  const first = sortedValues[0];
-  const last = sortedValues[sortedValues.length - 1];
-  if (value <= first) return first;
-  if (value >= last) return last;
-
-  let low = 0;
-  let high = sortedValues.length - 1;
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    const midVal = sortedValues[mid];
-    if (midVal === value) {
-      return midVal;
-    }
-    if (midVal < value) {
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-  const lower = sortedValues[Math.max(0, high)];
-  const upper = sortedValues[Math.min(sortedValues.length - 1, low)];
-  return (value - lower) <= (upper - value) ? lower : upper;
-};
-
-const getBoundingPair = (value, sortedValues) => {
-  if (!sortedValues || sortedValues.length === 0) {
-    return [value, value];
-  }
-  const first = sortedValues[0];
-  const last = sortedValues[sortedValues.length - 1];
-  if (value <= first) return [first, first];
-  if (value >= last) return [last, last];
-
-  let low = 0;
-  let high = sortedValues.length - 1;
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    const midVal = sortedValues[mid];
-    if (midVal === value) {
-      return [midVal, midVal];
-    }
-    if (midVal < value) {
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-  const lower = sortedValues[Math.max(0, high)];
-  const upper = sortedValues[Math.min(sortedValues.length - 1, low)];
-  return [lower, upper];
-};
-
-const findNearestSolarSample = (lat, lng) => {
-  if (SOLAR_LAT_KEYS.length === 0 || SOLAR_LNG_KEYS.length === 0) {
-    return null;
-  }
-  const nearestLat = getNearestValue(lat, SOLAR_LAT_KEYS);
-  const latData = solarSuitabilityData[nearestLat.toFixed(2)];
-  if (!latData) {
-    return null;
-  }
-  const nearestLng = getNearestValue(lng, SOLAR_LNG_KEYS);
-  const result = latData[nearestLng.toFixed(2)];
-  if (!result) {
-    return null;
-  }
-  return {
-    ...result,
-    score: result.overall,
-    substation: result.transmission,
-  };
-};
-
 // Get solar suitability data for a coordinate using 30x30 grid
 // Uses coordinate-based indexing - no need to load entire dataset
 const getSolarForCoord = (lat, lng) => {
@@ -540,11 +458,14 @@ const getSolarForCoord = (lat, lng) => {
   const latRounded = Math.round(lat / SOLAR_GRID_SPACING) * SOLAR_GRID_SPACING;
   const lngRounded = Math.round(lng / SOLAR_GRID_SPACING) * SOLAR_GRID_SPACING;
   
-  // Synchronous lookup from cache (async fetch happens in background)
+  // Synchronous lookup from cache only - no background fetching here
   const cacheKey = `${latRounded.toFixed(6)}_${lngRounded.toFixed(6)}`;
   
   if (SOLAR_DATA_CACHE.has(cacheKey)) {
     const data = SOLAR_DATA_CACHE.get(cacheKey);
+    if (data === null) {
+      return null; // Cached failure - coordinate has no data
+    }
     return {
       ...data,
       score: data.overall,
@@ -552,15 +473,7 @@ const getSolarForCoord = (lat, lng) => {
     };
   }
   
-  // Prefetch data point in background (non-blocking)
-  fetchSolarDataPoint(latRounded, lngRounded).then(data => {
-    if (data) {
-      SOLAR_DATA_CACHE.set(cacheKey, data);
-    }
-  });
-  
-  // Return null for now - will be populated on next render
-  // Or fallback to coarse grid if needed
+  // Not in cache - caller should trigger fetch explicitly if needed
   return null;
 };
 
@@ -585,73 +498,9 @@ const getPolygonBounds = (coordinates) => {
 
 // Get average elevation for a polygon
 // NOTE: Deleted getAverageElevation function - it used fake elevation data
+// NOTE: Deleted getAverageSolar function - all farms now use backend-calculated avgSuitability
 
-// Get average solar suitability for a polygon
-const getAverageSolar = (coordinates) => {
-  if (!coordinates || coordinates.length === 0) return null;
-  
-  const bounds = getPolygonBounds(coordinates);
-  
-  // For small farms, just sample the center point
-  const centerLat = (bounds.minLat + bounds.maxLat) / 2;
-  const centerLng = (bounds.minLng + bounds.maxLng) / 2;
-  
-  const centerSolar = getSolarForCoord(centerLat, centerLng);
-  
-  // DEBUG: Log land_cover value
-  console.log('🌍 AVG SOLAR:', {
-    hasData: !!centerSolar,
-    land_cover: centerSolar?.land_cover,
-    overall: centerSolar?.overall,
-    isWater: centerSolar?.land_cover === 0,
-  });
-  
-  // If we got data from center, use it (return ALL fields)
-  if (centerSolar) {
-    return centerSolar; // Return the entire object with all fields
-  }
-  
-  // Otherwise try sampling multiple points and average ALL fields
-  const step = 0.05;
-  let overallSum = 0;
-  let landCoverSum = 0;
-  let slopeSum = 0;
-  let transmissionSum = 0;
-  let populationSum = 0;
-  let scoreSum = 0;
-  let count = 0;
-  
-  for (let lat = bounds.minLat; lat <= bounds.maxLat; lat += step) {
-    for (let lng = bounds.minLng; lng <= bounds.maxLng; lng += step) {
-      const solar = getSolarForCoord(lat, lng);
-      if (solar) {
-        overallSum += solar.overall || solar.score || 0;
-        landCoverSum += solar.land_cover || 0;
-        slopeSum += solar.slope || 0;
-        transmissionSum += solar.transmission || solar.substation || 0;
-        populationSum += solar.population || 0;
-        scoreSum += solar.score || 0;
-        count++;
-      }
-    }
-  }
-  
-  if (count > 0) {
-    return {
-      overall: overallSum / count,
-      land_cover: landCoverSum / count,
-      slope: slopeSum / count,
-      transmission: transmissionSum / count,
-      substation: transmissionSum / count,  // Backward compatibility
-      population: populationSum / count,
-      score: scoreSum / count
-    };
-  }
-  
-  return null;
-};
-
-// Generate contour lines using d3-contour library with synthetic terrain variation
+// Generate contour lines using d3-contour library with REAL LandFire 2020 slope data
 const generateContourLines = (coordinates, tileSize, contourInterval = 5) => {
   if (!coordinates || coordinates.length === 0) {
     return [];
@@ -747,258 +596,9 @@ const generateContourLines = (coordinates, tileSize, contourInterval = 5) => {
   return contourPaths;
 };
 
-// Generate elevation heat map cells based on slope data
-// TURF.JS IMPLEMENTATION - Industry-standard geospatial library
-// Reference: https://turfjs.org/docs/#booleanPointInPolygon
-// Handles all polygon shapes, orientations, and edge cases correctly
-// CLIPPATH APPROACH: Generate ALL cells in bounding box, let SVG clipPath handle clipping
-// Reference: MDN - https://developer.mozilla.org/en-US/docs/Web/SVG/Element/clipPath
-// "A clipping path restricts the region to which paint can be applied"
-const generateElevationHeatMap = (coords, tileSize) => {
-  if (!coords || coords.length < 3) {
-    return [];
-  }
-  
-  // Calculate bounding box
-  const bounds = {
-    minLat: Math.min(...coords.map(c => c[1])),
-    maxLat: Math.max(...coords.map(c => c[1])),
-    minLng: Math.min(...coords.map(c => c[0])),
-    maxLng: Math.max(...coords.map(c => c[0])),
-  };
-  
-  const latRange = bounds.maxLat - bounds.minLat;
-  const lngRange = bounds.maxLng - bounds.minLng;
-  
-  // Use adaptive grid size based on tile size - small tiles don't need high resolution
-  // 15x15 for small tiles (~110px), 50x50 for expanded (~350px)
-  const targetCells = tileSize < 150 ? 15 : 50;
-  const cellsX = targetCells;
-  const cellsY = targetCells;
-  
-  const pixelWidth = tileSize / cellsX;
-  const pixelHeight = tileSize / cellsY;
-  const cellLatHeight = latRange / cellsY;
-  const cellLngWidth = lngRange / cellsX;
-  
-  // First pass: collect ALL slope values to determine ranking
-  const cellData = [];
-  for (let row = 0; row < cellsY; row++) {
-    for (let col = 0; col < cellsX; col++) {
-      const centerLat = bounds.minLat + (row + 0.5) * cellLatHeight;
-      const centerLng = bounds.minLng + (col + 0.5) * cellLngWidth;
-      const solarData = getSolarForCoord(centerLat, centerLng);
-      const slope = solarData?.slope ?? 0;
-      cellData.push({ row, col, slope });
-    }
-  }
-
-  if (cellData.length === 0) {
-    return [];
-  }
-
-  // Build rank lookup so colors are based on numeric rank (not fake gradients).
-  const sortedSlopes = [...cellData.map(c => c.slope)].sort((a, b) => a - b);
-  const slopeToRank = new Map();
-  const denom = Math.max(sortedSlopes.length - 1, 1);
-  sortedSlopes.forEach((value, index) => {
-    if (!slopeToRank.has(value)) {
-      slopeToRank.set(value, index / denom);
-    }
-  });
-
-  const minSlope = sortedSlopes[0];
-  const maxSlope = sortedSlopes[sortedSlopes.length - 1];
-  const uniqueSlopeCount = slopeToRank.size;
-  
-  // Second pass: generate ALL cells with colors based on rank (0=green,1=brown)
-  const cells = [];
-  for (const cell of cellData) {
-    const { row, col, slope } = cell;
-    const normalized = slopeToRank.get(slope) ?? 0;
-    const color = getElevationColorFromNormalized(normalized);
-    
-    cells.push({
-      x: col * pixelWidth,
-      y: (cellsY - row - 1) * pixelHeight,
-      width: pixelWidth + 0.5,
-      height: pixelHeight + 0.5,
-      slope: slope,
-      color: color,
-    });
-  }
-  
-  return cells;
-};
-
-const generateSolarHeatMap = (coords, bounds, tileSize, options = {}) => {
-  if (!coords || coords.length < 3 || !bounds) {
-    return { cells: [], stats: null, grid: null };
-  }
-
-  const { includeStats = false } = options;
-  
-  // Use adaptive grid size based on tile size - small tiles don't need high resolution
-  // 15x15 for small tiles (~110px), 50x50 for expanded (~350px)
-  const targetCells = tileSize < 150 ? 15 : 50;
-
-  const latRange = Math.max(bounds.maxLat - bounds.minLat, Number.EPSILON);
-  const lngRange = Math.max(bounds.maxLng - bounds.minLng, Number.EPSILON);
-
-  const cellsX = targetCells;
-  const cellsY = targetCells;
-
-  const pixelWidth = tileSize / cellsX;
-  const pixelHeight = tileSize / cellsY;
-  const cellLatHeight = latRange / cellsY;
-  const cellLngWidth = lngRange / cellsX;
-
-  const allData = [];
-  const scoreValues = [];
-  let statsMin = Infinity;
-  let statsMax = -Infinity;
-  let statsSum = 0;
-  let statsCount = 0;
-  let nullCellCount = 0;
-  const uniqueScores = new Set();
-
-  // First pass: collect ALL solar values (like elevation does with slope)
-  for (let row = 0; row < cellsY; row++) {
-    for (let col = 0; col < cellsX; col++) {
-      const cellLat = bounds.minLat + (row + 0.5) * cellLatHeight;
-      const cellLng = bounds.minLng + (col + 0.5) * cellLngWidth;
-      const cellSolar = getSolarForCoord(cellLat, cellLng);
-      // Track null returns
-      if (!cellSolar) nullCellCount++;
-      // Always use a value - fallback to 50 (mid-range) if no data, like elevation uses 0
-      const score = cellSolar?.overall ?? cellSolar?.score ?? 50;
-
-      if (includeStats) {
-        const cellBounds = {
-          minLat: bounds.minLat + row * cellLatHeight,
-          maxLat: bounds.minLat + (row + 1) * cellLatHeight,
-          minLng: bounds.minLng + col * cellLngWidth,
-          maxLng: bounds.minLng + (col + 1) * cellLngWidth,
-        };
-
-        if (cellIntersectsPolygon(cellBounds, coords)) {
-          statsMin = Math.min(statsMin, score);
-          statsMax = Math.max(statsMax, score);
-          statsSum += score;
-          statsCount += 1;
-          uniqueScores.add(score);
-        }
-      }
-
-      // ALWAYS include cells - match elevation behavior
-      allData.push({ row, col, score });
-      scoreValues.push(score);
-    }
-  }
-
-  if (allData.length === 0) {
-    return { cells: [], stats: null, grid: null };
-  }
-
-  // Build rank lookup - EXACTLY like elevation does
-  const sortedScores = [...scoreValues].sort((a, b) => a - b);
-  const denom = Math.max(sortedScores.length - 1, 1);
-  const scoreToRank = new Map();
-  sortedScores.forEach((value, index) => {
-    if (!scoreToRank.has(value)) {
-      scoreToRank.set(value, index / denom);
-    }
-  });
-
-  // DEBUG: Log unique scores and map size
-  const uniqueScoresList = [...new Set(scoreValues)];
-  console.log('🔍 SOLAR DEBUG:', {
-    totalCells: allData.length,
-    nullCells: nullCellCount,
-    uniqueScores: uniqueScoresList.length,
-    mapSize: scoreToRank.size,
-    scoreRange: [sortedScores[0], sortedScores[sortedScores.length - 1]],
-    sampleScores: uniqueScoresList.slice(0, 5),
-  });
-
-  // Generate ALL cells with colors based on rank - EXACTLY like elevation
-  const cells = [];
-  let missedLookups = 0;
-  for (const cell of allData) {
-    const { row, col, score } = cell;
-    const normalized = scoreToRank.get(score) ?? 0;
-    if (!scoreToRank.has(score)) missedLookups++;
-    const color = getSolarGradientColor(normalized);
-    
-    cells.push({
-      key: `solar-${row}-${col}`,
-      x: col * pixelWidth,
-      y: (cellsY - row - 1) * pixelHeight,
-      width: pixelWidth + 0.5,
-      height: pixelHeight + 0.5,
-      color: color,
-      score: score,
-    });
-  }
-  
-  if (missedLookups > 0) {
-    console.warn('⚠️ SOLAR MISSED LOOKUPS:', missedLookups, 'of', allData.length);
-  }
-
-  const stats = includeStats && statsCount > 0 ? {
-    minScore: statsMin,
-    maxScore: statsMax,
-    avgScore: statsSum / statsCount,
-    sampleCount: statsCount,
-    uniqueScoreCount: uniqueScores.size,
-  } : null;
-
-  // Log unique colors generated
-  const uniqueColors = new Set(cells.map(c => c.color));
-  console.log('🎨 SOLAR COLORS:', {
-    uniqueColors: uniqueColors.size,
-    sampleColors: [...uniqueColors].slice(0, 5),
-  });
-
-  return {
-    cells,
-    stats,
-    grid: {
-      cols: cellsX,
-      rows: cellsY,
-      cellLatHeight,
-      cellLngWidth,
-    },
-  };
-};
-
-// Get elevation color from normalized value (0-1)
-// 0 = lowest elevation (green), 1 = highest elevation (brown/red)
-const getElevationColorFromNormalized = (normalized) => {
-  // Elevation colors: low=green (valleys), mid=yellow/tan, high=brown/red (peaks)
-  if (normalized < 0.33) {
-    // Low elevation: Green to yellow-green
-    const t = normalized / 0.33;
-    const r = Math.floor(34 + (154 - 34) * t);
-    const g = Math.floor(139 + (205 - 139) * t);
-    const b = Math.floor(34 + (50 - 34) * t);
-    return `rgb(${r}, ${g}, ${b})`;
-  } else if (normalized < 0.67) {
-    // Mid elevation: Yellow-green to tan/beige
-    const t = (normalized - 0.33) / 0.34;
-    const r = Math.floor(154 + (210 - 154) * t);
-    const g = Math.floor(205 + (180 - 205) * t);
-    const b = Math.floor(50 + (140 - 50) * t);
-    return `rgb(${r}, ${g}, ${b})`;
-  } else {
-    // High elevation: Tan to brown/red
-    const t = (normalized - 0.67) / 0.33;
-    const r = Math.floor(210 + (139 - 210) * t);
-    const g = Math.floor(180 + (90 - 180) * t);
-    const b = Math.floor(140 + (43 - 140) * t);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-};
+// NOTE: generateElevationHeatMap removed - all farms now use backend-generated heat maps
+// NOTE: generateSolarHeatMap removed - all farms now use backend-generated heat maps
+// NOTE: getElevationColorFromNormalized removed - all colors now calculated by backend
 
 // View types for the horizontal carousel - different views of a particular farm
 const VIEW_TYPES = [
@@ -1161,6 +761,19 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const drawerAnim = useRef(new Animated.Value(0)).current;
   const carouselRef = useRef(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Backend analysis rehydration
+  const analysisByFarmIdRef = useRef(new Map());
+  const analysisInFlightRef = useRef(new Set());
+  const [analysisTick, setAnalysisTick] = useState(0);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    // Fire-and-forget so it doesn't block UI.
+    setTimeout(() => {
+      runNetworkProbe();
+    }, 0);
+  }, []);
   
   // Modal state for expanded tile view
   const [expandedModalVisible, setExpandedModalVisible] = useState(false);
@@ -1177,6 +790,152 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   
   // Cache for pre-rendered tile JSX to avoid re-rendering during scroll
   const tileRenderCache = useRef({});
+
+  const clearCachesForStableFarmId = useCallback((stableFarmId) => {
+    if (!stableFarmId) return;
+    const viewPrefix = `${stableFarmId}-`;
+    Object.keys(viewDataCache.current).forEach((k) => {
+      if (k.startsWith(viewPrefix)) delete viewDataCache.current[k];
+    });
+    Object.keys(tileRenderCache.current).forEach((k) => {
+      if (k.startsWith(viewPrefix)) delete tileRenderCache.current[k];
+    });
+  }, []);
+
+  const getFarmWithHydratedAnalysis = useCallback((farm) => {
+    if (!farm?.id) return farm;
+    const cached = analysisByFarmIdRef.current.get(farm.id);
+    if (!cached) return farm;
+    return {
+      ...farm,
+      backendAnalysis: cached,
+    };
+  }, [analysisTick]);
+
+  const ensureFarmAnalysis = useCallback(async (farm, options = {}) => {
+    const farmId = farm?.id;
+    const coords = farm?.geometry?.coordinates?.[0] || [];
+    if (!farmId || coords.length < 3) return;
+
+    const force = Boolean(options?.force);
+
+    // If grids exist but landcover report is missing (or errored), allow refresh.
+    const needsLandcoverReport =
+      !farm?.backendAnalysis?.landcoverReport ||
+      (farm?.backendAnalysis?.landcoverReportError && !farm?.backendAnalysis?.landcoverReport);
+
+    // Already has full grids in-memory
+    if (!force && farm?.backendAnalysis?.solarHeatMapGrid && farm?.backendAnalysis?.elevationHeatMapGrid && !needsLandcoverReport) return;
+
+    // Already hydrated
+    const cached = analysisByFarmIdRef.current.get(farmId);
+    const cachedNeedsLandcover =
+      !cached?.landcoverReport || (cached?.landcoverReportError && !cached?.landcoverReport);
+    if (!force && cached?.solarHeatMapGrid && cached?.elevationHeatMapGrid && !cachedNeedsLandcover) return;
+
+    if (analysisInFlightRef.current.has(farmId)) return;
+    analysisInFlightRef.current.add(farmId);
+
+    try {
+      const ring = Array.isArray(coords) ? coords.slice() : [];
+      if (ring.length >= 1) {
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        if (!last || first?.[0] !== last?.[0] || first?.[1] !== last?.[1]) {
+          ring.push(first);
+        }
+      }
+
+      const response = await fetch(buildApiUrl('/farms/analyze'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ farmId, coordinates: ring, county, city }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Backend API error (${response.status}): ${errorText}`);
+      }
+
+      const analysis = await response.json();
+      const solarOk =
+        analysis?.solarHeatMapGrid?.width > 0 &&
+        analysis?.solarHeatMapGrid?.height > 0 &&
+        Array.isArray(analysis?.solarHeatMapGrid?.cells);
+      const elevOk =
+        analysis?.elevationHeatMapGrid?.width > 0 &&
+        analysis?.elevationHeatMapGrid?.height > 0 &&
+        Array.isArray(analysis?.elevationHeatMapGrid?.cells);
+
+      const existingAnalysis =
+        analysisByFarmIdRef.current.get(farmId) || farm?.backendAnalysis || null;
+
+      const hasReportKey =
+        analysis && Object.prototype.hasOwnProperty.call(analysis, 'landcoverReport');
+      const hasErrorKey =
+        analysis && Object.prototype.hasOwnProperty.call(analysis, 'landcoverReportError');
+      const hasLandcoverUpdate = Boolean(hasReportKey || hasErrorKey);
+
+      if (solarOk && elevOk) {
+        // Store full payload, including landcover report if provided.
+        analysisByFarmIdRef.current.set(farmId, analysis);
+        const stableFarmId = getStableFarmId(farmId, coords);
+        clearCachesForStableFarmId(stableFarmId);
+        setAnalysisTick((t) => t + 1);
+      } else {
+        // If the backend returns only the landcover report (or a non-fatal error), persist it even
+        // when solar/elevation grids are incomplete. This keeps the Satellite modal useful.
+        if (hasLandcoverUpdate) {
+          const merged = {
+            ...(existingAnalysis || {}),
+            ...analysis,
+            // Preserve existing grids if the refreshed payload doesn't include valid ones.
+            solarHeatMapGrid: solarOk ? analysis.solarHeatMapGrid : existingAnalysis?.solarHeatMapGrid,
+            elevationHeatMapGrid: elevOk ? analysis.elevationHeatMapGrid : existingAnalysis?.elevationHeatMapGrid,
+          };
+          analysisByFarmIdRef.current.set(farmId, merged);
+          setAnalysisTick((t) => t + 1);
+        }
+
+        console.warn(
+          hasLandcoverUpdate
+            ? 'Rehydration returned incomplete grids; stored landcover update and kept existing grids.'
+            : 'Rehydration returned incomplete grids; keeping placeholder render.',
+          {
+            farmId,
+            solar: analysis?.solarHeatMapGrid
+              ? {
+                  width: analysis.solarHeatMapGrid.width,
+                  height: analysis.solarHeatMapGrid.height,
+                  cells: Array.isArray(analysis.solarHeatMapGrid.cells)
+                    ? analysis.solarHeatMapGrid.cells.length
+                    : null,
+                }
+              : null,
+            elev: analysis?.elevationHeatMapGrid
+              ? {
+                  width: analysis.elevationHeatMapGrid.width,
+                  height: analysis.elevationHeatMapGrid.height,
+                  cells: Array.isArray(analysis.elevationHeatMapGrid.cells)
+                    ? analysis.elevationHeatMapGrid.cells.length
+                    : null,
+                }
+              : null,
+            landcover: {
+              hasReportKey,
+              hasErrorKey,
+              hasReport: Boolean(analysis?.landcoverReport),
+              hasError: Boolean(analysis?.landcoverReportError),
+            },
+          }
+        );
+      }
+    } catch (e) {
+      console.error('Failed to rehydrate farm analysis:', e?.message || e);
+    } finally {
+      analysisInFlightRef.current.delete(farmId);
+    }
+  }, [county, city, clearCachesForStableFarmId]);
   
   // Only farms that have been "built" (have pins / a pinCount) should appear in the top carousel
   const builtFarms = useMemo(() => {
@@ -1203,9 +962,37 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       setCurrentIndex(builtFarms.length - 1);
     }
   }, [builtFarms.length]);
+
+  // Rehydrate backend analysis on-demand for the currently viewed farm(s)
+  useEffect(() => {
+    const currentFarm = builtFarms[currentIndex] || farms?.[currentIndex];
+    if (currentFarm) ensureFarmAnalysis(currentFarm);
+  }, [builtFarms, farms, currentIndex, ensureFarmAnalysis]);
+
+  useEffect(() => {
+    if (!expandedModalVisible) return;
+    if (expandedFarmIndex === null || expandedFarmIndex === undefined) return;
+    const expandedFarm = builtFarms[expandedFarmIndex];
+    if (expandedFarm) ensureFarmAnalysis(expandedFarm);
+  }, [expandedModalVisible, expandedFarmIndex, builtFarms, ensureFarmAnalysis]);
   
   // Form state
-  const [farmName, setFarmName] = useState('');
+  const [selectedFarmIds, setSelectedFarmIds] = useState([]);
+  const [farmDropdownOpen, setFarmDropdownOpen] = useState(false);
+  const [siteIncludes, setSiteIncludes] = useState(''); // 'farming', 'grazing', or 'neither'
+  // Rotation selection state
+  const [rotationFarmId, setRotationFarmId] = useState(null);
+  const [rotationFarmDropdownOpen, setRotationFarmDropdownOpen] = useState(false);
+  const [rotationDropdownOpen, setRotationDropdownOpen] = useState(false);
+  const [rotationSearch, setRotationSearch] = useState('');
+  const [cropOptions, setCropOptions] = useState([]);
+  const [cropOptionsLoading, setCropOptionsLoading] = useState(false);
+  const [cropOptionsError, setCropOptionsError] = useState('');
+  // rotationByFarmId[farmId] = { cropIds: number[] }
+  const [rotationByFarmId, setRotationByFarmId] = useState({});
+  const [rotationDraftByFarmId, setRotationDraftByFarmId] = useState({});
+
+  // Other form fields (restored)
   const [farmType, setFarmType] = useState('');
   const [acreage, setAcreage] = useState('');
   const [primaryCrops, setPrimaryCrops] = useState('');
@@ -1213,11 +1000,127 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [irrigationType, setIrrigationType] = useState('');
   const [notes, setNotes] = useState('');
 
-  const isFormValid = farmName.trim() !== '' && farmType.trim() !== '';
+  const isFormValid = selectedFarmIds.length > 0 && siteIncludes !== '';
+
+  const toggleFarmSelection = (farmId) => {
+    setSelectedFarmIds(prev => 
+      prev.includes(farmId) 
+        ? prev.filter(id => id !== farmId)
+        : [...prev, farmId]
+    );
+  };
+
+  const selectSiteInclude = (option) => {
+    setSiteIncludes(option);
+  };
+
+  // Keep rotationFarmId pointed at a selected farm
+  useEffect(() => {
+    if (selectedFarmIds.length === 0) {
+      setRotationFarmId(null);
+      return;
+    }
+    if (rotationFarmId && selectedFarmIds.includes(rotationFarmId)) return;
+    setRotationFarmId(selectedFarmIds[0]);
+  }, [selectedFarmIds, rotationFarmId]);
+
+  // Seed draft state from saved state when changing selected rotation farm
+  useEffect(() => {
+    if (!rotationFarmId) return;
+    setRotationDraftByFarmId((prev) => {
+      if (prev[rotationFarmId]) return prev;
+      const saved = rotationByFarmId?.[rotationFarmId];
+      return {
+        ...prev,
+        [rotationFarmId]: { cropIds: Array.isArray(saved?.cropIds) ? saved.cropIds : [] },
+      };
+    });
+  }, [rotationFarmId, rotationByFarmId]);
+
+  // Load crop options (for searchable dropdown)
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCrops = async () => {
+      setCropOptionsLoading(true);
+      setCropOptionsError('');
+      try {
+        const response = await fetch(buildApiUrl('/crops'));
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Backend API error (${response.status}): ${text}`);
+        }
+        const data = await response.json();
+        const crops = Array.isArray(data?.crops) ? data.crops : [];
+        if (!cancelled) setCropOptions(crops);
+      } catch (e) {
+        if (!cancelled) setCropOptionsError(e?.message || 'Failed to load crops');
+      } finally {
+        if (!cancelled) setCropOptionsLoading(false);
+      }
+    };
+
+    loadCrops();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const getFarmLabel = useCallback((farmId) => {
+    const farm = builtFarms.find((f) => f?.id === farmId);
+    return farm?.properties?.name || (farm ? `Farm ${builtFarms.indexOf(farm) + 1}` : 'Farm');
+  }, [builtFarms]);
+
+  const rotationDraft = rotationFarmId ? rotationDraftByFarmId?.[rotationFarmId] : null;
+  const rotationDraftCropIds = Array.isArray(rotationDraft?.cropIds) ? rotationDraft.cropIds : [];
+
+  const toggleRotationCrop = useCallback((cropId) => {
+    if (!rotationFarmId) return;
+
+    setRotationDraftByFarmId((prev) => {
+      const current = prev?.[rotationFarmId];
+      const existingIds = Array.isArray(current?.cropIds) ? current.cropIds : [];
+      const nextIds = existingIds.includes(cropId)
+        ? existingIds.filter((id) => id !== cropId)
+        : [...existingIds, cropId];
+      return {
+        ...prev,
+        [rotationFarmId]: { cropIds: nextIds },
+      };
+    });
+  }, [rotationFarmId]);
+
+  const setNoRotationForFarm = useCallback(() => {
+    if (!rotationFarmId) return;
+    setRotationDraftByFarmId((prev) => ({
+      ...prev,
+      [rotationFarmId]: { cropIds: [] },
+    }));
+  }, [rotationFarmId]);
+
+  const saveRotationForCurrentFarm = useCallback(() => {
+    if (!rotationFarmId) return;
+    setRotationByFarmId((prev) => ({
+      ...prev,
+      [rotationFarmId]: { cropIds: rotationDraftCropIds },
+    }));
+  }, [rotationFarmId, rotationDraftCropIds]);
+
+  const filteredCropOptions = useMemo(() => {
+    const term = rotationSearch.trim().toLowerCase();
+    if (!term) return cropOptions;
+    return cropOptions.filter((c) => {
+      const name = String(c?.name || '').toLowerCase();
+      const crop = String(c?.crop || '').toLowerCase();
+      const category = String(c?.category || '').toLowerCase();
+      return name.includes(term) || crop.includes(term) || category.includes(term);
+    });
+  }, [cropOptions, rotationSearch]);
 
   // Get or compute cached view data for a farm
   const getViewData = useCallback((farmId, coords, tileSize, options = {}) => {
     const includeSolarStats = options.includeSolarStats ?? false;
+    const farm = options.farm; // Pass farm object to access backendAnalysis
     const stableFarmId = getStableFarmId(farmId, coords);
     const cacheKey = `${stableFarmId}-${tileSize}-${includeSolarStats ? 'stats' : 'base'}`;
     
@@ -1233,17 +1136,72 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     
     // Polygon points
     const polygonPoints = normalizePolygon(coords, tileSize);
+
+    const padding = tileSize * 0.1;
+    const availableSize = tileSize - padding * 2;
+
+    const backendElevGrid = farm?.backendAnalysis?.elevationHeatMapGrid;
+    const elevGridWidth = backendElevGrid?.width > 0 ? backendElevGrid.width : 30;
+    const elevGridHeight = backendElevGrid?.height > 0 ? backendElevGrid.height : 30;
+    const elevCellPixelWidth = availableSize / elevGridWidth;
+    const elevCellPixelHeight = availableSize / elevGridHeight;
+
+    const elevationHeatMap = backendElevGrid?.cells
+      ? backendElevGrid.cells.map((cell) => ({
+          x: padding + (cell.col * elevCellPixelWidth),
+          y: padding + ((backendElevGrid.height - cell.row - 1) * elevCellPixelHeight),
+          width: elevCellPixelWidth + 0.5,
+          height: elevCellPixelHeight + 0.5,
+          slope: cell.slope,
+          color: cell.color,
+        }))
+      : [];
+
+    if (backendElevGrid?.width > 0 && backendElevGrid?.height > 0) {
+      console.log(`Backend elevation: ${backendElevGrid.width}x${backendElevGrid.height}, ${elevationHeatMap.length} cells`);
+    }
     
-    // Elevation data (uses real slope from LandFire 2020)
+    // Contour lines (uses real slope from LandFire 2020)
     const contourLines = generateContourLines(coords, tileSize, 5); // 5% slope interval
-  const elevationHeatMap = generateElevationHeatMap(coords, tileSize); // Adaptive grid based on aspect ratio
     
-    // Solar data
-    const avgSolar = getAverageSolar(coords);
-    const solarColor = avgSolar ? getSolarColor(avgSolar.score) : '#888888';
-    const solarHeatMap = generateSolarHeatMap(coords, bounds, tileSize, {
-      includeStats: includeSolarStats,
-    });
+    const backendGrid = farm?.backendAnalysis?.solarHeatMapGrid;
+    const avgSuitability = farm?.backendAnalysis?.metadata?.avgSuitability ?? 0;
+
+    const solarGridWidth = backendGrid?.width > 0 ? backendGrid.width : 30;
+    const solarGridHeight = backendGrid?.height > 0 ? backendGrid.height : 30;
+    const solarCellPixelWidth = availableSize / solarGridWidth;
+    const solarCellPixelHeight = availableSize / solarGridHeight;
+
+    const cells = backendGrid?.cells
+      ? backendGrid.cells.map((cell) => ({
+          key: `solar-${cell.row}-${cell.col}`,
+          x: padding + (cell.col * solarCellPixelWidth),
+          y: padding + ((backendGrid.height - cell.row - 1) * solarCellPixelHeight),
+          width: solarCellPixelWidth + 0.5,
+          height: solarCellPixelHeight + 0.5,
+          color: cell.color,
+          score: cell.score,
+        }))
+      : [];
+
+    const solarHeatMap = {
+      cells,
+      stats: includeSolarStats
+        ? {
+            avg: avgSuitability,
+            min: backendGrid?.cells?.length ? Math.min(...backendGrid.cells.map((c) => c.score)) : 0,
+            max: backendGrid?.cells?.length ? Math.max(...backendGrid.cells.map((c) => c.score)) : 0,
+            count: backendGrid?.cells?.length ?? 0,
+          }
+        : null,
+    };
+
+    const avgSolar = { score: avgSuitability, overall: avgSuitability };
+    const solarColor = getSolarGradientColorForScore(avgSuitability);
+
+    if (backendGrid?.width > 0 && backendGrid?.height > 0) {
+      console.log(`Backend solar: ${backendGrid.width}x${backendGrid.height}, ${cells.length} cells, avg=${avgSuitability}`);
+    }
     
     // Satellite tile data
     const zoom = 17;
@@ -1260,19 +1218,19 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     const tileXEnd = Math.floor(maxTileX);
     const tileYEnd = Math.floor(maxTileY);
     
-    const padding = tileSize * 0.1;
-    const availableSize = tileSize - padding * 2;
+    const satellitePadding = tileSize * 0.1;
+    const satelliteAvailableSize = tileSize - satellitePadding * 2;
     
     const geoWidth = bounds.maxLng - bounds.minLng || 0.0001;
     const geoHeight = bounds.maxLat - bounds.minLat || 0.0001;
-    const scale = Math.min(availableSize / geoWidth, availableSize / geoHeight);
+    const scale = Math.min(satelliteAvailableSize / geoWidth, satelliteAvailableSize / geoHeight);
     
     const geoCenterLng = (bounds.minLng + bounds.maxLng) / 2;
     const geoCenterLat = (bounds.minLat + bounds.maxLat) / 2;
     
     const lngLatToPixel = (lng, lat) => {
-      const x = padding + (lng - geoCenterLng) * scale + availableSize / 2;
-      const y = padding + (geoCenterLat - lat) * scale + availableSize / 2;
+      const x = satellitePadding + (lng - geoCenterLng) * scale + satelliteAvailableSize / 2;
+      const y = satellitePadding + (geoCenterLat - lat) * scale + satelliteAvailableSize / 2;
       return { x, y };
     };
     
@@ -1294,7 +1252,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
         const tileBottomRight = lngLatToPixel(tileBounds.tileLngMax, tileBounds.tileLatMin);
         
         tiles.push({
-          url: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${tx}`,
+          url: `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ty}/${tx}`,
           x: tileTopLeft.x,
           y: tileTopLeft.y,
           width: tileBottomRight.x - tileTopLeft.x,
@@ -1474,14 +1432,18 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   };
 
   const handleNext = () => {
+    const effectiveRotationsByFarmId = { ...rotationByFarmId };
+    // Merge draft rotations for selected farms so the latest selections aren't dropped.
+    selectedFarmIds.forEach((farmId) => {
+      const draft = rotationDraftByFarmId?.[farmId];
+      if (!draft) return;
+      const cropIds = Array.isArray(draft.cropIds) ? draft.cropIds : [];
+      effectiveRotationsByFarmId[farmId] = { cropIds };
+    });
+
     const farmDescription = {
-      farmName: farmName.trim(),
-      farmType: farmType.trim(),
-      acreage: acreage.trim(),
-      primaryCrops: primaryCrops.trim(),
-      soilType: soilType.trim(),
-      irrigationType: irrigationType.trim(),
-      notes: notes.trim(),
+      selectedFarmIds,
+      rotationsByFarmId: effectiveRotationsByFarmId,
     };
 
     if (onNavigateNext) {
@@ -1508,10 +1470,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Describe Your Farm</Text>
-        <Text style={styles.headerSubtitle}>
-          {city}, {county} County
-        </Text>
+        <Text style={styles.headerTitle}>Define Your Solar Site</Text>
       </View>
 
       <KeyboardAvoidingView 
@@ -1524,95 +1483,292 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           showsVerticalScrollIndicator={true}
           persistentScrollbar={true}
         >
-          {/* Farm Name */}
+          {/* Select Farms */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Farm Name *</Text>
-            <TextInput
-              style={styles.input}
-              value={farmName}
-              onChangeText={setFarmName}
-              placeholder="Enter farm name"
-              placeholderTextColor={COLORS.placeholder}
-            />
+            <Text style={styles.label}>Select Farm(s) *</Text>
+            <Pressable 
+              style={styles.dropdownButton}
+              onPress={() => setFarmDropdownOpen(!farmDropdownOpen)}
+            >
+              <Text style={styles.dropdownButtonText}>
+                {selectedFarmIds.length === 0 
+                  ? 'Select farms...'
+                  : `${selectedFarmIds.length} farm${selectedFarmIds.length > 1 ? 's' : ''} selected`
+                }
+              </Text>
+              <Text style={styles.dropdownArrow}>{farmDropdownOpen ? '▲' : '▼'}</Text>
+            </Pressable>
+            {farmDropdownOpen && (
+              <ScrollView style={styles.dropdownList} nestedScrollEnabled={true}>
+                {builtFarms.length === 0 ? (
+                  <Text style={styles.dropdownEmptyText}>No farms built yet</Text>
+                ) : (
+                  builtFarms.map((farm) => (
+                    <Pressable
+                      key={farm.id}
+                      style={styles.dropdownItem}
+                      onPress={() => toggleFarmSelection(farm.id)}
+                    >
+                      <View style={styles.checkbox}>
+                        {selectedFarmIds.includes(farm.id) && (
+                          <Text style={styles.checkmark}>✓</Text>
+                        )}
+                      </View>
+                      <Text style={styles.dropdownItemText}>
+                        {farm.properties?.name || `Farm ${builtFarms.indexOf(farm) + 1}`}
+                      </Text>
+                    </Pressable>
+                  ))
+                )}
+              </ScrollView>
+            )}
           </View>
 
-          {/* Farm Type */}
+          {/* Will your site include */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Farm Type *</Text>
-            <TextInput
-              style={styles.input}
-              value={farmType}
-              onChangeText={setFarmType}
-              placeholder="e.g., Crop, Livestock, Mixed"
-              placeholderTextColor={COLORS.placeholder}
-            />
+            <Text style={styles.label}>Will your site include: *</Text>
+            <View style={styles.checkboxGroup}>
+              <Pressable
+                style={styles.checkboxOption}
+                onPress={() => selectSiteInclude('farming')}
+              >
+                <View style={styles.checkbox}>
+                  {siteIncludes === 'farming' && (
+                    <Text style={styles.checkmark}>✓</Text>
+                  )}
+                </View>
+                <Text style={styles.checkboxLabel}>Farming</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.checkboxOption}
+                onPress={() => selectSiteInclude('grazing')}
+              >
+                <View style={styles.checkbox}>
+                  {siteIncludes === 'grazing' && (
+                    <Text style={styles.checkmark}>✓</Text>
+                  )}
+                </View>
+                <Text style={styles.checkboxLabel}>Grazing</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.checkboxOption}
+                onPress={() => selectSiteInclude('neither')}
+              >
+                <View style={styles.checkbox}>
+                  {siteIncludes === 'neither' && (
+                    <Text style={styles.checkmark}>✓</Text>
+                  )}
+                </View>
+                <Text style={styles.checkboxLabel}>Neither</Text>
+              </Pressable>
+            </View>
           </View>
 
-          {/* Acreage */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Total Acreage</Text>
-            <TextInput
-              style={styles.input}
-              value={acreage}
-              onChangeText={setAcreage}
-              placeholder="Enter total acres"
-              placeholderTextColor={COLORS.placeholder}
-              keyboardType="numeric"
-            />
-          </View>
+          {/* Conditional Forms based on selection */}
+          {siteIncludes === 'farming' && (
+            <>
+              {/* Select Rotation (replaces Farm Type) */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Select Rotation</Text>
 
-          {/* Primary Crops */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Primary Crops/Products</Text>
-            <TextInput
-              style={styles.input}
-              value={primaryCrops}
-              onChangeText={setPrimaryCrops}
-              placeholder="e.g., Corn, Soybeans, Wheat"
-              placeholderTextColor={COLORS.placeholder}
-            />
-          </View>
+                <Text style={styles.subLabel}>Choose farm</Text>
+                <Pressable
+                  style={[styles.dropdownButton, selectedFarmIds.length === 0 && styles.dropdownButtonDisabled]}
+                  onPress={() => {
+                    if (selectedFarmIds.length === 0) return;
+                    setRotationFarmDropdownOpen(!rotationFarmDropdownOpen);
+                  }}
+                >
+                  <Text style={styles.dropdownButtonText}>
+                    {rotationFarmId ? getFarmLabel(rotationFarmId) : 'Select a farm...'}
+                  </Text>
+                  <Text style={styles.dropdownArrow}>{rotationFarmDropdownOpen ? '▲' : '▼'}</Text>
+                </Pressable>
 
-          {/* Soil Type */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Soil Type</Text>
-            <TextInput
-              style={styles.input}
-              value={soilType}
-              onChangeText={setSoilType}
-              placeholder="e.g., Clay, Sandy, Loam"
-              placeholderTextColor={COLORS.placeholder}
-            />
-          </View>
+                {rotationFarmDropdownOpen && (
+                  <ScrollView style={styles.dropdownList} nestedScrollEnabled={true}>
+                    {selectedFarmIds.map((farmId) => (
+                      <Pressable
+                        key={farmId}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setRotationFarmId(farmId);
+                          setRotationFarmDropdownOpen(false);
+                          setRotationDropdownOpen(false);
+                          setRotationSearch('');
+                        }}
+                      >
+                        <View style={styles.checkbox}>
+                          {rotationFarmId === farmId && <Text style={styles.checkmark}>✓</Text>}
+                        </View>
+                        <Text style={styles.dropdownItemText}>{getFarmLabel(farmId)}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                )}
 
-          {/* Irrigation Type */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Irrigation Type</Text>
-            <TextInput
-              style={styles.input}
-              value={irrigationType}
-              onChangeText={setIrrigationType}
-              placeholder="e.g., Drip, Sprinkler, None"
-              placeholderTextColor={COLORS.placeholder}
-            />
-          </View>
+                <Text style={[styles.subLabel, { marginTop: 12 }]}>Rotation crops (optional)</Text>
+                <Pressable
+                  style={[styles.dropdownButton, !rotationFarmId && styles.dropdownButtonDisabled]}
+                  onPress={() => {
+                    if (!rotationFarmId) return;
+                    setRotationDropdownOpen(!rotationDropdownOpen);
+                  }}
+                >
+                  <Text style={styles.dropdownButtonText}>
+                    {!rotationFarmId
+                      ? 'Select a farm first...'
+                      : rotationDraftCropIds.length === 0
+                        ? 'No rotation'
+                        : `${rotationDraftCropIds.length} crop${rotationDraftCropIds.length > 1 ? 's' : ''} selected`}
+                  </Text>
+                  <Text style={styles.dropdownArrow}>{rotationDropdownOpen ? '▲' : '▼'}</Text>
+                </Pressable>
 
-          {/* Additional Notes */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Additional Notes</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="Any additional information about your farm"
-              placeholderTextColor={COLORS.placeholder}
-              multiline={true}
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
+                {rotationDropdownOpen && (
+                  <View style={styles.dropdownList}>
+                    <TextInput
+                      style={styles.dropdownSearchInput}
+                      value={rotationSearch}
+                      onChangeText={setRotationSearch}
+                      placeholder="Search crops..."
+                      placeholderTextColor={COLORS.placeholder}
+                    />
 
-          <Text style={styles.requiredText}>* Required fields</Text>
+                    <Pressable
+                      style={styles.dropdownItem}
+                      onPress={() => setNoRotationForFarm()}
+                    >
+                      <View style={styles.checkbox}>
+                        {rotationDraftCropIds.length === 0 && <Text style={styles.checkmark}>✓</Text>}
+                      </View>
+                      <Text style={styles.dropdownItemText}>No rotation</Text>
+                    </Pressable>
+
+                    {cropOptionsLoading ? (
+                      <View style={styles.dropdownLoadingRow}>
+                        <ActivityIndicator size="small" color={COLORS.accent} />
+                        <Text style={styles.dropdownEmptyText}>Loading crops…</Text>
+                      </View>
+                    ) : cropOptionsError ? (
+                      <Text style={styles.dropdownEmptyText}>{cropOptionsError}</Text>
+                    ) : filteredCropOptions.length === 0 ? (
+                      <Text style={styles.dropdownEmptyText}>No crops found</Text>
+                    ) : (
+                      <ScrollView style={styles.dropdownInnerScroll} nestedScrollEnabled={true}>
+                        {filteredCropOptions.map((crop) => (
+                          <Pressable
+                            key={crop.id}
+                            style={styles.dropdownItem}
+                            onPress={() => toggleRotationCrop(crop.id)}
+                          >
+                            <View style={styles.checkbox}>
+                              {rotationDraftCropIds.includes(crop.id) && <Text style={styles.checkmark}>✓</Text>}
+                            </View>
+                            <Text style={styles.dropdownItemText}>{crop.name}</Text>
+                          </Pressable>
+                        ))}
+                      </ScrollView>
+                    )}
+                  </View>
+                )}
+
+                <Pressable
+                  style={[styles.rotationSaveButton, !rotationFarmId && styles.nextButtonDisabled]}
+                  onPress={saveRotationForCurrentFarm}
+                  disabled={!rotationFarmId}
+                >
+                  <Text style={styles.rotationSaveButtonText}>Save rotation for this farm</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {siteIncludes === 'grazing' && (
+            <>
+              {/* Grazing Type */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Grazing Type *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={farmType}
+                  onChangeText={setFarmType}
+                  placeholder="e.g., Rotational, Continuous, Intensive"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              {/* Acreage */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Total Acreage</Text>
+                <TextInput
+                  style={styles.input}
+                  value={acreage}
+                  onChangeText={setAcreage}
+                  placeholder="Enter total acres"
+                  placeholderTextColor={COLORS.placeholder}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              {/* Livestock Type */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Livestock Type</Text>
+                <TextInput
+                  style={styles.input}
+                  value={primaryCrops}
+                  onChangeText={setPrimaryCrops}
+                  placeholder="e.g., Cattle, Sheep, Goats"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              {/* Pasture Type */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Pasture Type</Text>
+                <TextInput
+                  style={styles.input}
+                  value={soilType}
+                  onChangeText={setSoilType}
+                  placeholder="e.g., Native, Improved, Mixed"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              {/* Water Source */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Water Source</Text>
+                <TextInput
+                  style={styles.input}
+                  value={irrigationType}
+                  onChangeText={setIrrigationType}
+                  placeholder="e.g., Pond, Well, Stream"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              {/* Additional Notes */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Additional Notes</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Any additional information about your grazing operation"
+                  placeholderTextColor={COLORS.placeholder}
+                  multiline={true}
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+            </>
+          )}
+
+          {(siteIncludes === 'farming' || siteIncludes === 'grazing' || siteIncludes === 'neither') && (
+            <Text style={styles.requiredText}>* Required fields</Text>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -1705,24 +1861,29 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
               
               {/* Selected farm info */}
               <View style={styles.selectedFarmInfo}>
+                {(() => {
+                  const currentFarm = builtFarms[currentIndex] || null;
+                  const coords = currentFarm?.geometry?.coordinates?.[0] || [];
+                  const { acres, sqMiles } = calculatePolygonArea(coords);
+                  const pinCount = currentFarm?.pins?.length ?? currentFarm?.properties?.pinCount ?? 0;
+
+                  return (
+                    <>
                 <Text style={styles.selectedFarmName}>
-                  {builtFarms[currentIndex]?.properties?.name || farms[currentIndex]?.properties?.name || `Farm ${currentIndex + 1}`}
+                      {currentFarm?.properties?.name || `Farm ${currentIndex + 1}`}
                 </Text>
                 <Text style={styles.selectedFarmDetails}>
-                  {(builtFarms[currentIndex]?.pins?.length || builtFarms[currentIndex]?.properties?.pinCount) || (farms[currentIndex]?.pins?.length || farms[currentIndex]?.properties?.pinCount) || 0} pins
+                      {pinCount} pins
                 </Text>
-                {(() => {
-                  const coords = (builtFarms[currentIndex]?.geometry?.coordinates?.[0]) || (farms[currentIndex]?.geometry?.coordinates?.[0]) || [];
-                  const { acres, sqMiles } = calculatePolygonArea(coords);
-                  return (
                     <Text style={styles.selectedFarmArea}>
-                      {acres.toFixed(2)} acres ({sqMiles.toFixed(4)} sq mi)
+                      {(acres ?? 0).toFixed(2)} acres ({(sqMiles ?? 0).toFixed(4)} sq mi)
                     </Text>
+                <Text style={styles.carouselIndicator}>
+                      {currentIndex + 1} / {builtFarms.length}
+                </Text>
+                    </>
                   );
                 })()}
-                <Text style={styles.carouselIndicator}>
-                  {currentIndex + 1} / {farms.length}
-                </Text>
               </View>
 
               {/* Horizontal View Type Carousel - Different views of selected farm */}
@@ -1746,20 +1907,22 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                   customAnimation={horizontalCarouselAnimationStyle}
                   renderItem={({ item: viewType, index }) => {
                     // Get the current farm's coordinates for rendering in different views
-                    const currentFarm = builtFarms[currentIndex] || farms[currentIndex] || null;
+                    const baseFarm = builtFarms[currentIndex] || farms[currentIndex] || null;
+                    const currentFarm = getFarmWithHydratedAnalysis(baseFarm);
                     const coords = currentFarm?.geometry?.coordinates?.[0] || [];
+                    const stableFarmId = getStableFarmId(currentFarm?.id, coords);
                     
                     if (!currentFarm || coords.length === 0) {
                       return <View style={[styles.viewTypeTile, { width: tileSize, height: tileSize }]} />;
                     }
                     
                     // Get cached view data (computed only once per farm)
-                    const viewData = getViewData(currentFarm.id, coords, tileSize - 10);
+                    const viewData = getViewData(currentFarm.id, coords, tileSize - 10, { farm: currentFarm });
                     const { bounds, polygonPoints, contourLines, elevationHeatMap, avgSolar, solarColor, tiles, solarHeatMap } = viewData;
                     const solarCells = solarHeatMap?.cells || [];
                     
-                    // Use stable clip IDs based on farm ID instead of currentIndex to allow caching
-                    const clipIdBase = `${currentFarm.id}-${viewType.id}`;
+                    // Use stable clip IDs to avoid collisions when farm.id is missing
+                    const clipIdBase = `${stableFarmId}-${viewType.id}`;
                     
                     // Get cached SVG content or render it once
                     const cachedSvgContent = getCachedTileRender(currentFarm.id, coords, viewType.id, tileSize - 10, () => {
@@ -1875,7 +2038,41 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           <View style={styles.modalContent}>
             {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <View style={{ width: 28 }} />
+              {(() => {
+                const baseFarm =
+                  expandedFarmIndex !== null && builtFarms[expandedFarmIndex]
+                    ? builtFarms[expandedFarmIndex]
+                    : null;
+                const currentFarm = baseFarm ? getFarmWithHydratedAnalysis(baseFarm) : null;
+                const refreshDisabled = !currentFarm || modalLoading;
+
+                return (
+                  <Pressable
+                    accessibilityLabel="Refresh"
+                    style={({ pressed }) => [
+                      styles.modalHeaderIconButton,
+                      pressed && styles.buttonPressed,
+                      refreshDisabled && { opacity: 0.6 },
+                    ]}
+                    disabled={refreshDisabled}
+                    onPress={async () => {
+                      if (!currentFarm) return;
+                      setModalLoading(true);
+                      try {
+                        await ensureFarmAnalysis(currentFarm, { force: true });
+                      } finally {
+                        setModalLoading(false);
+                      }
+                    }}
+                  >
+                    {modalLoading ? (
+                      <ActivityIndicator size="small" color={COLORS.text} />
+                    ) : (
+                      <Text style={styles.modalHeaderIconText}>↻</Text>
+                    )}
+                  </Pressable>
+                );
+              })()}
               {expandedFarmIndex !== null && builtFarms[expandedFarmIndex] && expandedViewType && (
                 <Text style={styles.modalTitle}>
                   {expandedViewType.name} - {builtFarms[expandedFarmIndex]?.properties?.name || `Farm ${expandedFarmIndex + 1}`}
@@ -1903,8 +2100,8 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 </View>
               ) : (() => {
                 if (expandedFarmIndex === null || !builtFarms[expandedFarmIndex] || !expandedViewType) return null;
-                
-                const currentFarm = builtFarms[expandedFarmIndex];
+
+                const currentFarm = getFarmWithHydratedAnalysis(builtFarms[expandedFarmIndex]);
                 const coords = currentFarm?.geometry?.coordinates?.[0] || [];
                 // Make tile larger since it's the only one displayed
                 const screenWidth = Dimensions.get('window').width;
@@ -1912,13 +2109,14 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 const expandedTileSize = Math.min(screenWidth * 0.7, screenHeight * 0.5, 350);
                 
                 // Get cached view data for the expanded tile size
-                const viewData = getViewData(currentFarm.id, coords, expandedTileSize, { includeSolarStats: true });
+                const viewData = getViewData(currentFarm.id, coords, expandedTileSize, { includeSolarStats: true, farm: currentFarm });
                 const { bounds, polygonPoints, contourLines, elevationHeatMap, avgSolar, solarColor, tiles, lngLatToPixel, availableSize, solarHeatMap } = viewData;
                 const solarCells = solarHeatMap?.cells || [];
                 const solarStats = solarHeatMap?.stats;
                 
-                // Use stable clip IDs based on farm ID for caching
-                const clipIdBase = `${currentFarm.id}-expanded`;
+                // Use stable clip IDs to avoid collisions when farm.id is missing
+                const stableFarmId = getStableFarmId(currentFarm?.id, coords);
+                const clipIdBase = `${stableFarmId}-expanded`;
                 
                 // Get cached SVG content for the expanded modal
                 const cachedExpandedSvg = getCachedTileRender(currentFarm.id, coords, `${expandedViewType.id}-expanded`, expandedTileSize, () => {
@@ -2000,142 +2198,193 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                     {/* Cached SVG content */}
                     {cachedExpandedSvg}
                     
-                    {/* Land Cover Information - Only show for satellite view */}
-                    {expandedViewType.id === 'satellite' && avgSolar && (() => {
-                      // Land cover data from NLCD 2024 raster (processed from Annual_NLCD_LndCov_2024_CU_C1V1.tif)
-                      // Data extracted using rasterio and scored per EGLE methodology
-                      const landCoverScore = avgSolar.land_cover || avgSolar.overall || avgSolar.score || 75;
-                      const landCoverInfo = interpretLandCover(landCoverScore);
-                      const costColor = landCoverInfo.costLevel === 'low' ? '#22C55E' : 
-                                       landCoverInfo.costLevel === 'medium' ? '#F59E0B' : '#EF4444';
-                      
+                    {/* Land Cover Report - Only show for satellite view */}
+                    {expandedViewType.id === 'satellite' && (() => {
+                      const report = currentFarm?.backendAnalysis?.landcoverReport;
+                      const reportError = currentFarm?.backendAnalysis?.landcoverReportError;
+                      const nlcdClasses = Array.isArray(report?.nlcd?.classes) ? report.nlcd.classes : [];
+                      const topClasses = nlcdClasses
+                        .slice()
+                        .sort((a, b) => ((b?.percent ?? b?.percentOfFarm) ?? 0) - ((a?.percent ?? a?.percentOfFarm) ?? 0))
+                        .slice(0, 3);
+
+                      const waterCoverageByTable = Array.isArray(report?.water?.coveragePercentByTable)
+                        ? report.water.coveragePercentByTable
+                        : [];
+
+                      const additionalCoverageByTable = Array.isArray(report?.layers?.coveragePercentByTable)
+                        ? report.layers.coveragePercentByTable
+                        : [];
+
+                      const estimatedTotalUsd = report?.sitePrepCost?.estimatedTotalUsd;
+                      const estimatedPerAcreUsd = report?.sitePrepCost?.estimatedPerAcreUsd;
+                      const waterPercent = report?.nlcd?.waterPercent;
+
+                      const sortedCoverageRows = (() => {
+                        const rows = [];
+
+                        rows.push({
+                          key: 'open-water',
+                          label: 'Open Water (NLCD 11)',
+                          value: `${(waterPercent ?? 0).toFixed(1)}%`,
+                        });
+
+                        if (waterCoverageByTable.length > 0) {
+                          waterCoverageByTable.forEach((row) => {
+                            const rawName = row?.table ?? row?.table_name ?? 'unknown';
+                            const label = String(rawName).replace(/^landcover_/, '').replace(/_/g, ' ');
+                            rows.push({
+                              key: `water-table-${rawName}`,
+                              label,
+                              value: `${(row?.percent ?? 0).toFixed(1)}%`,
+                            });
+                          });
+                        } else {
+                          rows.push({
+                            key: 'water-none',
+                            label: 'Water layers',
+                            value: 'Not available',
+                          });
+                        }
+
+                        if (additionalCoverageByTable.length > 0) {
+                          additionalCoverageByTable.forEach((row) => {
+                            const rawName = row?.table ?? row?.table_name ?? 'unknown';
+                            const label = String(rawName).replace(/^landcover_/, '').replace(/_/g, ' ');
+                            rows.push({
+                              key: `layer-table-${rawName}`,
+                              label,
+                              value: `${(row?.percent ?? 0).toFixed(1)}%`,
+                            });
+                          });
+                        } else {
+                          rows.push({
+                            key: 'layers-none',
+                            label: 'Other layers',
+                            value: 'Not available',
+                          });
+                        }
+
+                        return rows.sort((a, b) => String(a.label).localeCompare(String(b.label), undefined, { sensitivity: 'base' }));
+                      })();
+
+                      const pricingEquations = report?.sitePrepCost?.equations || null;
+                      const allEquationRows = Array.isArray(pricingEquations?.equations)
+                        ? pricingEquations.equations
+                        : [];
+                      const preferredEquationIds = new Set([
+                        'msuCostUsd',
+                        'mdotDevelopedItems',
+                        'mdotVegetationItems',
+                        'pricedAreaAcres',
+                        'estimatedTotalUsd',
+                        'estimatedPerAcreUsd',
+                      ]);
+                      const preferredEquationRows = allEquationRows.filter((e) => preferredEquationIds.has(e?.id));
+                      const equationRowsToShow = (preferredEquationRows.length > 0 ? preferredEquationRows : allEquationRows).slice(0, 8);
+                      const equationText = equationRowsToShow
+                        .filter((e) => e && e.equation)
+                        .map((e) => `${e.id ? `${e.id}: ` : ''}${e.equation}`)
+                        .join('\n');
+
+                      const sources = report?.sitePrepCost?.pricingSnapshot?.sources || null;
+                      const eiaUrl = sources?.eia?.sourceUrl || sources?.eia?.apiUrl || null;
+                      const msuUrl = sources?.msu?.url || null;
+                      const msuTitle = sources?.msu?.title || null;
+                      const mdotUrl = sources?.mdot?.url || null;
+
                       return (
                         <View style={styles.topoControls}>
-                          {/* Land Cover Classification */}
                           <View style={styles.landCoverHeader}>
                             <Text style={styles.landCoverTitle}>NLCD 2024 Land Cover</Text>
                             <Text style={[styles.landCoverSubtitle, { fontSize: 11, color: '#059669', marginTop: 2, fontWeight: '600' }]}>
-                              Based on NLCD 2024 satellite imagery
-                            </Text>
-                            <View style={[styles.landCoverTypeBadge, { backgroundColor: costColor, marginTop: 4 }]}>
-                              <Text style={styles.landCoverTypeText}>Score: {avgSolar.land_cover.toFixed(1)}/100</Text>
-                            </View>
-                          </View>
-                          
-                          {/* Land Cover Details */}
-                          <View style={styles.landCoverDetails}>
-                            <View style={styles.landCoverRow}>
-                              <Text style={styles.landCoverLabel}>NLCD Classification:</Text>
-                              <Text style={styles.landCoverValue}>{landCoverInfo.nlcdClasses}</Text>
-                            </View>
-                            <View style={styles.landCoverRow}>
-                              <Text style={styles.landCoverLabel}>Description:</Text>
-                              <Text style={styles.landCoverValue}>{landCoverInfo.description}</Text>
-                            </View>
-                            <View style={styles.landCoverRow}>
-                              <Text style={styles.landCoverLabel}>Clearing Cost:</Text>
-                              <Text style={[styles.landCoverValue, { color: costColor, fontWeight: '600' }]}>
-                                {landCoverInfo.clearingCost}
-                              </Text>
-                            </View>
-                            <View style={[styles.landCoverRow, { marginTop: 4 }]}>
-                              <Text style={[styles.landCoverLabel, { fontSize: 10, color: '#666' }]}>Data Resolution:</Text>
-                              <Text style={[styles.landCoverValue, { fontSize: 10, color: '#666' }]}>~2km grid</Text>
-                            </View>
-                          </View>
-                          
-                          {/* Notes */}
-                          <View style={styles.landCoverNotes}>
-                            <Text style={styles.landCoverNotesText}>
-                              <Text style={{ fontWeight: '600' }}>Note: </Text>
-                              {landCoverInfo.notes}
+                              Live landcover + Michigan pricing sources
                             </Text>
                           </View>
-                          
-                          {/* Cost Breakdown Table */}
-                          <View style={styles.costBreakdownContainer}>
-                            <Text style={styles.costBreakdownTitle}>Development Cost Breakdown</Text>
-                            
-                            {(() => {
-                              // Calculate farm area
-                              const { acres } = calculatePolygonArea(coords);
-                              
-                              // Cost estimates based on NLCD land cover type
-                              const getCostEstimate = (landType) => {
-                                switch(landType) {
-                                  case 'Agricultural / Open Land':
-                                    return { clearing: 500, grading: 600, prep: 400 };
-                                  case 'Open Development / Shrubland':
-                                    return { clearing: 2500, grading: 800, prep: 500 };
-                                  case 'Forested / Low Development':
-                                    return { clearing: 8000, grading: 1500, prep: 800 };
-                                  case 'Medium Development':
-                                    return { clearing: 12000, grading: 2000, prep: 1000 };
-                                  case 'Water / Wetland / Dense Urban':
-                                    return { clearing: 0, grading: 0, prep: 0 };
-                                  default:
-                                    return { clearing: 2500, grading: 800, prep: 500 };
-                                }
-                              };
-                              
-                              const costPerAcre = getCostEstimate(landCoverInfo.type);
-                              const clearingTotal = costPerAcre.clearing * acres;
-                              const gradingTotal = costPerAcre.grading * acres;
-                              const prepTotal = costPerAcre.prep * acres;
-                              const totalCost = clearingTotal + gradingTotal + prepTotal;
-                              
-                              const formatCost = (cost) => {
-                                if (cost === 0) return '$0';
-                                if (cost >= 1000000) return `$${(cost / 1000000).toFixed(2)}M`;
-                                if (cost >= 1000) return `$${(cost / 1000).toFixed(1)}K`;
-                                return `$${cost.toFixed(0)}`;
-                              };
-                              
-                              return (
-                                <>
-                                  <View style={styles.costTable}>
-                                    <View style={styles.costTableHeader}>
-                                      <Text style={styles.costTableHeaderText}>Item</Text>
-                                      <Text style={styles.costTableHeaderText}>Per Acre</Text>
-                                      <Text style={styles.costTableHeaderText}>Total</Text>
-                                    </View>
-                                    
-                                    <View style={styles.costTableRow}>
-                                      <Text style={styles.costTableCell}>Land Clearing</Text>
-                                      <Text style={styles.costTableCell}>${costPerAcre.clearing.toLocaleString()}</Text>
-                                      <Text style={styles.costTableCell}>{formatCost(clearingTotal)}</Text>
-                                    </View>
-                                    
-                                    <View style={styles.costTableRow}>
-                                      <Text style={styles.costTableCell}>Site Grading</Text>
-                                      <Text style={styles.costTableCell}>${costPerAcre.grading.toLocaleString()}</Text>
-                                      <Text style={styles.costTableCell}>{formatCost(gradingTotal)}</Text>
-                                    </View>
-                                    
-                                    <View style={styles.costTableRow}>
-                                      <Text style={styles.costTableCell}>Site Preparation</Text>
-                                      <Text style={styles.costTableCell}>${costPerAcre.prep.toLocaleString()}</Text>
-                                      <Text style={styles.costTableCell}>{formatCost(prepTotal)}</Text>
-                                    </View>
-                                    
-                                    <View style={styles.costTableDivider} />
-                                    
-                                    <View style={styles.costTableTotal}>
-                                      <Text style={styles.costTableTotalLabel}>Estimated Total ({acres.toFixed(1)} acres)</Text>
-                                      <Text style={styles.costTableTotalValue}>{formatCost(totalCost)}</Text>
-                                    </View>
+
+                          {!report && (
+                            <View style={styles.landCoverDetails}>
+                              <View style={styles.landCoverRow}>
+                                <Text style={styles.landCoverLabel}>Land cover:</Text>
+                                <Text style={styles.landCoverValue}>Land cover data not available yet</Text>
+                              </View>
+                              <View style={styles.landCoverRow}>
+                                <Text style={styles.landCoverLabel}>Clearing Cost:</Text>
+                                <Text style={styles.landCoverValue}>Clearing Cost Unknown</Text>
+                              </View>
+                              {reportError?.message && (
+                                <View style={styles.landCoverRow}>
+                                  <Text style={styles.landCoverLabel}>Status:</Text>
+                                  <Text style={styles.landCoverValue}>{reportError.message}</Text>
+                                </View>
+                              )}
+                            </View>
+                          )}
+
+                          {report && (
+                            <>
+                              {/* Estimated site-prep at the top */}
+                              <View style={styles.landCoverDetails}>
+                                <View style={styles.landCoverRow}>
+                                  <Text style={styles.landCoverLabel}>Estimated site prep:</Text>
+                                  <Text style={styles.landCoverValue}>{formatUsd(estimatedTotalUsd)}</Text>
+                                </View>
+                                <View style={styles.landCoverRow}>
+                                  <Text style={styles.landCoverLabel}>Per acre:</Text>
+                                  <Text style={styles.landCoverValue}>{formatUsd(estimatedPerAcreUsd)}</Text>
+                                </View>
+                              </View>
+
+                              {/* Percentages in blue box, with Top classes first (multiline) */}
+                              <View style={styles.landCoverPercentagesBox}>
+                                <View style={styles.landCoverRow}>
+                                  <Text style={[styles.landCoverLabel, styles.landCoverBoxLabel]}>Top classes:</Text>
+                                  <Text style={[styles.landCoverValue, styles.landCoverBoxValue, styles.landCoverValueMultiline]}>
+                                    {topClasses.length > 0
+                                      ? topClasses
+                                          .map((c) => `${c.name} (${(((c.percent ?? c.percentOfFarm) ?? 0)).toFixed(1)}%)`)
+                                          .join('\n')
+                                      : 'No NLCD classes returned'}
+                                  </Text>
+                                </View>
+
+                                {sortedCoverageRows.map((row) => (
+                                  <View key={row.key} style={styles.landCoverRow}>
+                                    <Text style={[styles.landCoverLabel, styles.landCoverBoxLabel]}>{row.label}:</Text>
+                                    <Text style={[styles.landCoverValue, styles.landCoverBoxValue]}>{row.value}</Text>
                                   </View>
-                                  
-                                  <Text style={styles.costDisclaimer}>
-                                    * Cost estimates based on typical land cover clearing costs. Actual costs vary by site conditions, accessibility, and local rates.
+                                ))}
+                              </View>
+
+                              {/* Equations below percentages (orange box) */}
+                              <View style={styles.landCoverEquationBox}>
+                                <Text style={styles.landCoverEquationText}>
+                                  <Text style={{ fontWeight: '700' }}>Pricing equations:</Text>
+                                  {equationText ? `\n${equationText}` : ' Not available'}
+                                </Text>
+                              </View>
+
+                              {/* Sources at the very bottom */}
+                              <View style={styles.landCoverNotes}>
+                                <Text style={styles.landCoverNotesText}>
+                                  <Text style={{ fontWeight: '600' }}>Sources: </Text>
+                                  {msuTitle ? `${msuTitle}. ` : ''}
+                                  {msuUrl ? `MSU: ${msuUrl}. ` : ''}
+                                  {mdotUrl ? `MDOT: ${mdotUrl}. ` : ''}
+                                  {eiaUrl ? `EIA: ${eiaUrl}.` : ''}
+                                </Text>
+                              </View>
+
+                              {reportError?.message && (
+                                <View style={styles.landCoverNotes}>
+                                  <Text style={styles.landCoverNotesText}>
+                                    <Text style={{ fontWeight: '600' }}>Note: </Text>
+                                    {reportError.message}
                                   </Text>
-                                  <Text style={[styles.costDisclaimer, { marginTop: 4 }]}>
-                                    * Land cover data from Michigan EGLE Solar Tool (NLCD 2021) at ~2km resolution. Nearby farms may share the same classification.
-                                  </Text>
-                                </>
-                              );
-                            })()}
-                          </View>
+                                </View>
+                              )}
+                            </>
+                          )}
                         </View>
                       );
                     })()}
@@ -2154,7 +2403,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                           {/* Average Score Display */}
                           <View style={styles.solarAvgScore}>
                             <Text style={styles.solarAvgScoreLabel}>Average Solar Suitability:</Text>
-                            <Text style={styles.solarAvgScoreValue}>{avgScore.toFixed(1)}</Text>
+                            <Text style={styles.solarAvgScoreValue}>{(avgScore ?? 0).toFixed(1)}</Text>
                           </View>
                           
                           {/* Legend */}
@@ -2164,7 +2413,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                               <View style={styles.topoLegendRow}>
                                 <View style={styles.topoLegendEndColumn}>
                                   <Text style={styles.topoLegendEndLabel}>Lowest</Text>
-                                  <Text style={styles.topoLegendValue}>{minScore.toFixed(0)}</Text>
+                                  <Text style={styles.topoLegendValue}>{(minScore ?? 0).toFixed(0)}</Text>
                                 </View>
                                 <View style={styles.topoLegendGradient}>
                                   <View style={[styles.topoLegendColorBox, { backgroundColor: '#DC2626' }]} />
@@ -2175,7 +2424,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                                 </View>
                                 <View style={styles.topoLegendEndColumn}>
                                   <Text style={styles.topoLegendEndLabel}>Highest</Text>
-                                  <Text style={styles.topoLegendValue}>{maxScore.toFixed(0)}</Text>
+                                  <Text style={styles.topoLegendValue}>{(maxScore ?? 0).toFixed(0)}</Text>
                                 </View>
                               </View>
                             </View>
@@ -2346,6 +2595,123 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.text,
   },
+  dropdownButton: {
+    backgroundColor: COLORS.inputBg,
+    borderWidth: 2,
+    borderColor: COLORS.borderLight,
+    borderRadius: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dropdownButtonText: {
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  dropdownArrow: {
+    fontSize: 14,
+    color: COLORS.textLight,
+  },
+  dropdownList: {
+    backgroundColor: COLORS.inputBg,
+    borderWidth: 2,
+    borderColor: COLORS.borderLight,
+    borderRadius: 6,
+    marginTop: 4,
+    maxHeight: 200,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  dropdownInnerScroll: {
+    maxHeight: 180,
+  },
+  dropdownSearchInput: {
+    backgroundColor: COLORS.inputBg,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: COLORS.text,
+  },
+  dropdownLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  dropdownButtonDisabled: {
+    opacity: 0.6,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+  subLabel: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    marginBottom: 6,
+  },
+  rotationSaveButton: {
+    marginTop: 12,
+    backgroundColor: COLORS.buttonBg,
+    borderWidth: 1,
+    borderColor: COLORS.buttonBorder,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  rotationSaveButtonText: {
+    color: COLORS.buttonText,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+    borderColor: COLORS.borderLight,
+    borderRadius: 3,
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.inputBg,
+  },
+  checkmark: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: COLORS.accent,
+  },
+  dropdownItemText: {
+    fontSize: 16,
+    color: COLORS.text,
+  },
+  dropdownEmptyText: {
+    padding: 14,
+    fontSize: 14,
+    color: COLORS.textLight,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  checkboxGroup: {
+    flexDirection: 'row',
+    gap: 16,
+    flexWrap: 'wrap',
+  },
+  checkboxOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  checkboxLabel: {
+    fontSize: 16,
+    color: COLORS.text,
+  },
   textArea: {
     minHeight: 100,
     paddingTop: 12,
@@ -2471,6 +2837,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: 2,
     borderBottomColor: COLORS.borderLight,
+    textAlign: 'center',
   },
   drawerScroll: {
     flex: 1,
@@ -2569,15 +2936,18 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.text,
     marginBottom: 4,
+    textAlign: 'center',
   },
   selectedFarmDetails: {
     fontSize: 14,
     color: COLORS.textLight,
+    textAlign: 'center',
   },
   selectedFarmArea: {
     fontSize: 14,
     color: COLORS.textLight,
     marginTop: 4,
+    textAlign: 'center',
   },
   carouselIndicator: {
     fontSize: 12,
@@ -2752,6 +3122,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  modalHeaderIconButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalHeaderIconText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
   modalBody: {
     flex: 1,
   },
@@ -2895,6 +3276,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     gap: 6,
   },
+  landCoverPercentagesBox: {
+    backgroundColor: '#2F5D9A',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 6,
+    marginTop: 6,
+  },
+  landCoverEquationBox: {
+    backgroundColor: '#B45309',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginTop: 6,
+  },
+  landCoverEquationText: {
+    fontSize: 10,
+    color: '#FFFFFF',
+    textAlign: 'left',
+  },
+  landCoverBoxLabel: {
+    color: '#FFFFFF',
+  },
+  landCoverBoxValue: {
+    color: '#FFFFFF',
+  },
+  landCoverValueMultiline: {
+    textAlign: 'right',
+    lineHeight: 14,
+  },
   landCoverRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2919,7 +3330,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    marginTop: 4,
+    marginTop: 6,
   },
   landCoverNotesText: {
     fontSize: 10,

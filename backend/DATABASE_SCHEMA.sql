@@ -1,263 +1,239 @@
--- Michigan Solar Optimization Database Schema
--- PostgreSQL with PostGIS extension
+-- Michigan Solar Optimization Tool
+-- Database schema (PostgreSQL + PostGIS)
 
--- Enable PostGIS extension for spatial data
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- Table: Solar Suitability Grid Data
--- Stores the 120M point high-resolution solar suitability data
-CREATE TABLE solar_suitability (
-    id BIGSERIAL PRIMARY KEY,
-    location GEOGRAPHY(POINT, 4326) NOT NULL,  -- Lat/Lng point (WGS84)
-    lat DECIMAL(10, 7) NOT NULL,
-    lng DECIMAL(10, 7) NOT NULL,
-    overall_score DECIMAL(5, 2),               -- Overall suitability score
-    land_cover_score DECIMAL(5, 2),            -- NLCD 2024 land cover score
-    slope_score DECIMAL(5, 2),                 -- LandFire 2020 slope score
-    transmission_score DECIMAL(5, 2),          -- Proximity to transmission lines
-    population_score DECIMAL(5, 2),            -- GPW 2020 population density score
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- Core grid dataset
+CREATE TABLE IF NOT EXISTS solar_suitability (
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  overall_score DOUBLE PRECISION,
+  land_cover_score DOUBLE PRECISION,
+  slope_score DOUBLE PRECISION,
+  transmission_score DOUBLE PRECISION,
+  population_score DOUBLE PRECISION,
+  PRIMARY KEY (lat, lng)
 );
 
--- Create spatial index for fast geographic queries
-CREATE INDEX idx_solar_suitability_location ON solar_suitability USING GIST(location);
+CREATE INDEX IF NOT EXISTS idx_solar_suitability_lat_lng
+  ON solar_suitability (lat, lng);
 
--- Create composite index for lat/lng lookups
-CREATE INDEX idx_solar_suitability_lat_lng ON solar_suitability(lat, lng);
+-- Nearest-point lookup (approximate ordering, precise meters via haversine)
+CREATE OR REPLACE FUNCTION get_nearest_solar_point(p_lat DOUBLE PRECISION, p_lng DOUBLE PRECISION)
+RETURNS TABLE (
+  lat DOUBLE PRECISION,
+  lng DOUBLE PRECISION,
+  overall_score DOUBLE PRECISION,
+  land_cover_score DOUBLE PRECISION,
+  slope_score DOUBLE PRECISION,
+  transmission_score DOUBLE PRECISION,
+  population_score DOUBLE PRECISION,
+  distance_m DOUBLE PRECISION
+)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH candidates AS (
+    SELECT s.*,
+           ((s.lat - p_lat) * (s.lat - p_lat) + (s.lng - p_lng) * (s.lng - p_lng)) AS dist2
+    FROM solar_suitability s
+    ORDER BY dist2
+    LIMIT 1
+  )
+  SELECT
+    c.lat,
+    c.lng,
+    c.overall_score,
+    c.land_cover_score,
+    c.slope_score,
+    c.transmission_score,
+    c.population_score,
+    (2 * 6371000 * asin(
+      sqrt(
+        pow(sin(radians((c.lat - p_lat) / 2)), 2)
+        + cos(radians(p_lat)) * cos(radians(c.lat))
+        * pow(sin(radians((c.lng - p_lng) / 2)), 2)
+      )
+    )) AS distance_m
+  FROM candidates c;
+$$;
 
--- Create index for overall score filtering
-CREATE INDEX idx_solar_suitability_overall ON solar_suitability(overall_score);
-
--- Table: Michigan Counties
-CREATE TABLE counties (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    fips_code VARCHAR(5) UNIQUE NOT NULL,
-    boundary GEOGRAPHY(POLYGON, 4326),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_counties_boundary ON counties USING GIST(boundary);
-
--- Table: Michigan Cities
-CREATE TABLE cities (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    county_id INTEGER REFERENCES counties(id),
-    location GEOGRAPHY(POINT, 4326),
-    population INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_cities_location ON cities USING GIST(location);
-CREATE INDEX idx_cities_county ON cities(county_id);
-
--- Table: Michigan MCD (Minor Civil Divisions)
-CREATE TABLE mcd (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    county_id INTEGER REFERENCES counties(id),
-    boundary GEOGRAPHY(MULTIPOLYGON, 4326),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_mcd_boundary ON mcd USING GIST(boundary);
-
--- Table: Transmission Lines
-CREATE TABLE transmission_lines (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(200),
-    voltage INTEGER,                           -- Voltage in kV
-    line_type VARCHAR(50),
-    geometry GEOGRAPHY(LINESTRING, 4326),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_transmission_lines_geometry ON transmission_lines USING GIST(geometry);
-
--- Table: Solar Facilities
-CREATE TABLE solar_facilities (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(200),
-    capacity_mw DECIMAL(10, 2),                -- Capacity in megawatts
-    location GEOGRAPHY(POINT, 4326),
-    status VARCHAR(50),                         -- operational, planned, etc.
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_solar_facilities_location ON solar_facilities USING GIST(location);
-
--- Table: User Farms (persisted from app)
-CREATE TABLE farms (
-    id BIGSERIAL PRIMARY KEY,
-    user_id VARCHAR(100),                      -- User identifier
-    name VARCHAR(200) NOT NULL,
-    boundary GEOGRAPHY(POLYGON, 4326) NOT NULL,
-    area_acres DECIMAL(10, 2),
-    centroid GEOGRAPHY(POINT, 4326),
-    avg_suitability DECIMAL(5, 2),             -- Average suitability score
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_farms_boundary ON farms USING GIST(boundary);
-CREATE INDEX idx_farms_user ON farms(user_id);
-
--- Table: Farm Analysis Results (cached calculations)
-CREATE TABLE farm_analysis (
-    id BIGSERIAL PRIMARY KEY,
-    farm_id BIGINT REFERENCES farms(id) ON DELETE CASCADE,
-    total_points INTEGER,                      -- Number of grid points in farm
-    avg_overall DECIMAL(5, 2),
-    avg_land_cover DECIMAL(5, 2),
-    avg_slope DECIMAL(5, 2),
-    avg_transmission DECIMAL(5, 2),
-    avg_population DECIMAL(5, 2),
-    min_score DECIMAL(5, 2),
-    max_score DECIMAL(5, 2),
-    suitable_area_acres DECIMAL(10, 2),        -- Area with score > threshold
-    analysis_data JSONB,                       -- Detailed analysis results
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_farm_analysis_farm ON farm_analysis(farm_id);
-
--- Table: Elevation Data (if needed separately)
-CREATE TABLE elevation (
-    id BIGSERIAL PRIMARY KEY,
-    location GEOGRAPHY(POINT, 4326) NOT NULL,
-    lat DECIMAL(10, 7) NOT NULL,
-    lng DECIMAL(10, 7) NOT NULL,
-    elevation_m DECIMAL(8, 2),                 -- Elevation in meters
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_elevation_location ON elevation USING GIST(location);
-CREATE INDEX idx_elevation_lat_lng ON elevation(lat, lng);
-
--- View: Solar Suitability Summary Statistics
+-- Aggregate stats used by /api/solar/stats
 CREATE OR REPLACE VIEW solar_suitability_stats AS
-SELECT 
-    COUNT(*) as total_points,
-    AVG(overall_score) as avg_overall,
-    MIN(overall_score) as min_overall,
-    MAX(overall_score) as max_overall,
-    STDDEV(overall_score) as stddev_overall,
-    PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY overall_score) as q1_overall,
-    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY overall_score) as median_overall,
-    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY overall_score) as q3_overall
-FROM solar_suitability;
+SELECT
+  COUNT(*)::BIGINT AS total_points,
+  AVG(overall_score) AS avg_overall,
+  MIN(overall_score) AS min_overall,
+  MAX(overall_score) AS max_overall,
+  STDDEV_POP(overall_score) AS stddev_overall,
+  percentile_cont(0.25) WITHIN GROUP (ORDER BY overall_score) AS q1_overall,
+  percentile_cont(0.50) WITHIN GROUP (ORDER BY overall_score) AS median_overall,
+  percentile_cont(0.75) WITHIN GROUP (ORDER BY overall_score) AS q3_overall
+FROM solar_suitability
+WHERE overall_score IS NOT NULL;
 
--- Function: Get solar data for a bounding box
-CREATE OR REPLACE FUNCTION get_solar_data_bbox(
-    min_lat DECIMAL,
-    min_lng DECIMAL,
-    max_lat DECIMAL,
-    max_lng DECIMAL
+-- Farm persistence (optional, but required by existing API queries)
+CREATE TABLE IF NOT EXISTS farms (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  boundary GEOGRAPHY(POLYGON, 4326) NOT NULL,
+  area_acres DOUBLE PRECISION,
+  centroid GEOGRAPHY(POINT, 4326),
+  avg_suitability DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_farms_user_id
+  ON farms (user_id);
+
+CREATE TABLE IF NOT EXISTS farm_analysis (
+  farm_id BIGINT PRIMARY KEY REFERENCES farms(id) ON DELETE CASCADE,
+  total_points INTEGER,
+  avg_overall DOUBLE PRECISION,
+  avg_land_cover DOUBLE PRECISION,
+  avg_slope DOUBLE PRECISION,
+  avg_transmission DOUBLE PRECISION,
+  avg_population DOUBLE PRECISION,
+  min_score DOUBLE PRECISION,
+  max_score DOUBLE PRECISION,
+  suitable_area_acres DOUBLE PRECISION,
+  analysis_data JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Optional geo tables used by /api/geo endpoints
+CREATE TABLE IF NOT EXISTS counties (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  fips_code TEXT,
+  boundary GEOGRAPHY(MULTIPOLYGON, 4326)
+);
+
+CREATE TABLE IF NOT EXISTS cities (
+  id BIGSERIAL PRIMARY KEY,
+  county_id BIGINT REFERENCES counties(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  population BIGINT,
+  location GEOGRAPHY(POINT, 4326)
+);
+
+-- Crop reference data (for Michigan-focused agricultural workflows)
+CREATE TABLE IF NOT EXISTS crops (
+  id BIGSERIAL PRIMARY KEY,
+  crop TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  category TEXT,
+  -- Yield is stored as kg/ha; basis indicates whether values are fresh weight, dry matter, or grain at standard moisture
+  -- yield_basis_code: 1=grain_std_moisture, 2=fresh_weight, 3=dry_matter
+  yield_basis_code SMALLINT NOT NULL DEFAULT 2,
+  yield_moisture_percent DOUBLE PRECISION,
+  yield_low_kg_ha DOUBLE PRECISION,
+  yield_typical_kg_ha DOUBLE PRECISION,
+  yield_high_kg_ha DOUBLE PRECISION,
+  -- Seasonal water requirement (approx ETc) in mm across the growing season
+  water_low_mm_season DOUBLE PRECISION,
+  water_high_mm_season DOUBLE PRECISION,
+  -- Simple sunlight proxy (direct sun hours/day)
+  sun_hours_min DOUBLE PRECISION,
+  sun_hours_optimal DOUBLE PRECISION,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Nutrient requirements keyed by crop
+CREATE TABLE IF NOT EXISTS crop_nutrient_requirements (
+  crop_id BIGINT PRIMARY KEY REFERENCES crops(id) ON DELETE CASCADE,
+  -- Macronutrients in kg/ha as fertilizer application rate ranges (soil-test dependent)
+  n_low_kg_ha DOUBLE PRECISION,
+  n_high_kg_ha DOUBLE PRECISION,
+  p2o5_low_kg_ha DOUBLE PRECISION,
+  p2o5_high_kg_ha DOUBLE PRECISION,
+  k2o_low_kg_ha DOUBLE PRECISION,
+  k2o_high_kg_ha DOUBLE PRECISION,
+  other_nutrients JSONB,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seed: crops common in Michigan (idempotent)
+INSERT INTO crops (
+  crop,
+  name,
+  category,
+  yield_basis_code,
+  yield_moisture_percent,
+  yield_low_kg_ha,
+  yield_typical_kg_ha,
+  yield_high_kg_ha,
+  water_low_mm_season,
+  water_high_mm_season,
+  sun_hours_min,
+  sun_hours_optimal,
+  notes
 )
-RETURNS TABLE (
-    lat DECIMAL,
-    lng DECIMAL,
-    overall_score DECIMAL,
-    land_cover_score DECIMAL,
-    slope_score DECIMAL,
-    transmission_score DECIMAL,
-    population_score DECIMAL
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        s.lat,
-        s.lng,
-        s.overall_score,
-        s.land_cover_score,
-        s.slope_score,
-        s.transmission_score,
-        s.population_score
-    FROM solar_suitability s
-    WHERE s.lat BETWEEN min_lat AND max_lat
-      AND s.lng BETWEEN min_lng AND max_lng
-    ORDER BY s.lat, s.lng;
-END;
-$$ LANGUAGE plpgsql;
+VALUES
+  -- Grains are stored at standard moisture (corn ~15.5%, soy/wheat ~13%).
+  ('corn_grain', 'Corn (grain)', 'row_crop', 1, 15.5, 9000, 11400, 13000, 450, 650, 6, 8, NULL),
+  ('soybeans', 'Soybeans', 'row_crop', 1, 13.0, 2500, 3000, 3500, 350, 550, 6, 8, NULL),
+  ('wheat', 'Wheat', 'grain', 1, 13.0, 5000, 6000, 7000, 300, 450, 6, 8, NULL),
+  ('dry_beans', 'Dry beans', 'legume', 2, NULL, 2000, 2500, 3000, 300, 450, 6, 8, NULL),
+  ('sugar_beets', 'Sugar beets', 'row_crop', 2, NULL, 50000, 60000, 70000, 550, 750, 6, 8, NULL),
+  ('potatoes', 'Potatoes', 'vegetable', 2, NULL, 40000, 45000, 50000, 400, 600, 6, 8, NULL),
+  ('tart_cherries', 'Tart cherries', 'fruit', 2, NULL, 10000, 12500, 15000, 300, 500, 6, 8, NULL),
+  ('apples', 'Apples', 'fruit', 2, NULL, 30000, 35000, 40000, 300, 500, 6, 8, NULL),
+  ('blueberries', 'Blueberries', 'fruit', 2, NULL, 6000, 8000, 10000, 350, 550, 6, 8, 'Often managed for acidic soils'),
+  ('grapes', 'Grapes', 'fruit', 2, NULL, 8000, 10000, 12000, 350, 550, 6, 8, NULL),
+  ('cucumbers', 'Cucumbers', 'vegetable', 2, NULL, 20000, 25000, 30000, 350, 500, 6, 8, NULL),
+  ('tomatoes', 'Tomatoes', 'vegetable', 2, NULL, 40000, 50000, 60000, 400, 600, 6, 8, NULL),
+  ('asparagus', 'Asparagus', 'vegetable', 2, NULL, 5000, 6000, 7000, 300, 450, 6, 8, NULL),
+  ('carrots', 'Carrots', 'vegetable', 2, NULL, 30000, 35000, 40000, 300, 450, 6, 8, NULL),
+  ('onions', 'Onions', 'vegetable', 2, NULL, 30000, 35000, 40000, 300, 450, 6, 8, NULL),
+  ('alfalfa_hay', 'Alfalfa / hay', 'forage', 3, 0.0, 6000, 7000, 8000, 600, 800, 6, 8, 'Yield is dry matter (DM)')
+ON CONFLICT (crop) DO NOTHING;
 
--- Function: Get nearest solar data point
-CREATE OR REPLACE FUNCTION get_nearest_solar_point(
-    target_lat DECIMAL,
-    target_lng DECIMAL
+-- Seed: nutrient requirement categories (coarse defaults; refine per-rotation/soil test)
+INSERT INTO crop_nutrient_requirements (
+  crop_id,
+  n_low_kg_ha,
+  n_high_kg_ha,
+  p2o5_low_kg_ha,
+  p2o5_high_kg_ha,
+  k2o_low_kg_ha,
+  k2o_high_kg_ha,
+  other_nutrients,
+  notes
 )
-RETURNS TABLE (
-    lat DECIMAL,
-    lng DECIMAL,
-    overall_score DECIMAL,
-    land_cover_score DECIMAL,
-    slope_score DECIMAL,
-    transmission_score DECIMAL,
-    population_score DECIMAL,
-    distance_m DECIMAL
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        s.lat,
-        s.lng,
-        s.overall_score,
-        s.land_cover_score,
-        s.slope_score,
-        s.transmission_score,
-        s.population_score,
-        ST_Distance(
-            s.location,
-            ST_MakePoint(target_lng, target_lat)::geography
-        ) as distance_m
-    FROM solar_suitability s
-    ORDER BY s.location <-> ST_MakePoint(target_lng, target_lat)::geography
-    LIMIT 1;
-END;
-$$ LANGUAGE plpgsql;
-
--- Function: Calculate farm suitability
-CREATE OR REPLACE FUNCTION calculate_farm_suitability(
-    farm_boundary GEOGRAPHY
-)
-RETURNS TABLE (
-    total_points BIGINT,
-    avg_overall DECIMAL,
-    avg_land_cover DECIMAL,
-    avg_slope DECIMAL,
-    avg_transmission DECIMAL,
-    avg_population DECIMAL,
-    min_score DECIMAL,
-    max_score DECIMAL
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        COUNT(*)::BIGINT,
-        AVG(s.overall_score),
-        AVG(s.land_cover_score),
-        AVG(s.slope_score),
-        AVG(s.transmission_score),
-        AVG(s.population_score),
-        MIN(s.overall_score),
-        MAX(s.overall_score)
-    FROM solar_suitability s
-    WHERE ST_Intersects(s.location, farm_boundary);
-END;
-$$ LANGUAGE plpgsql;
-
--- Partitioning strategy for large solar_suitability table
--- Partition by latitude ranges (Upper/Lower Peninsula)
-CREATE TABLE solar_suitability_upper PARTITION OF solar_suitability
-    FOR VALUES FROM (45.0) TO (48.5);
-
-CREATE TABLE solar_suitability_lower PARTITION OF solar_suitability
-    FOR VALUES FROM (41.5) TO (45.0);
-
--- Add comments for documentation
-COMMENT ON TABLE solar_suitability IS '120M point high-resolution solar suitability data for Michigan at 0.96 acre resolution';
-COMMENT ON TABLE farms IS 'User-created farm boundaries with analysis results';
-COMMENT ON TABLE farm_analysis IS 'Cached farm analysis to avoid recalculation';
-COMMENT ON FUNCTION get_solar_data_bbox IS 'Retrieve solar data for a rectangular geographic area';
-COMMENT ON FUNCTION get_nearest_solar_point IS 'Find the closest solar data point to given coordinates';
-COMMENT ON FUNCTION calculate_farm_suitability IS 'Calculate average suitability scores for a farm boundary';
+SELECT c.id,
+       v.n_low_kg_ha,
+       v.n_high_kg_ha,
+       v.p2o5_low_kg_ha,
+       v.p2o5_high_kg_ha,
+       v.k2o_low_kg_ha,
+       v.k2o_high_kg_ha,
+       v.other_nutrients,
+       v.notes
+FROM crops c
+JOIN (
+  VALUES
+    -- Values are typical Michigan recommendation ranges in kg/ha as N, P2O5, K2O.
+    ('corn_grain', 100, 240, 45, 90, 40, 90, NULL::jsonb, NULL),
+    ('soybeans', 0, 0, 50, 60, 45, 75, NULL::jsonb, 'Nitrogen often supplied via fixation; exact rates depend on soil test and yield goal'),
+    ('wheat', 35, 100, 30, 65, 20, 35, NULL::jsonb, NULL),
+    ('dry_beans', 45, 55, 20, 30, 25, 45, NULL::jsonb, NULL),
+    ('sugar_beets', 50, 90, 25, 45, 75, 120, NULL::jsonb, NULL),
+    ('potatoes', 100, 200, 30, 70, 100, 200, NULL::jsonb, NULL),
+    ('tart_cherries', 30, 50, 20, 60, 50, 150, NULL::jsonb, NULL),
+    ('apples', 30, 65, 20, 80, 50, 150, NULL::jsonb, NULL),
+    ('blueberries', 25, 75, 40, 110, 50, 150, '{"pH":"acidic_preferred"}'::jsonb, NULL),
+    ('grapes', 20, 60, 30, 80, 60, 150, NULL::jsonb, NULL),
+    ('cucumbers', 50, 120, 15, 40, 60, 120, NULL::jsonb, NULL),
+    ('tomatoes', 100, 200, 50, 100, 100, 200, NULL::jsonb, NULL),
+    ('asparagus', 80, 200, 45, 90, 45, 90, NULL::jsonb, NULL),
+    ('carrots', 50, 120, 15, 80, 90, 400, NULL::jsonb, NULL),
+    ('onions', 50, 100, 135, 170, 335, 400, NULL::jsonb, NULL),
+    ('alfalfa_hay', 0, 20, 45, 175, 120, 320, NULL::jsonb, 'Legume N credit often reduces N needs; P/K removal can be high')
+) AS v(crop, n_low_kg_ha, n_high_kg_ha, p2o5_low_kg_ha, p2o5_high_kg_ha, k2o_low_kg_ha, k2o_high_kg_ha, other_nutrients, notes)
+  ON v.crop = c.crop
+ON CONFLICT (crop_id) DO NOTHING;

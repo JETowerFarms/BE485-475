@@ -124,8 +124,7 @@ async function setupDatabase() {
     console.log('✅ Database setup complete!');
     console.log('='.repeat(60));
     console.log('\nNext steps:');
-    console.log('1. Import solar data: npm run db:import');
-    console.log('2. Start the API server: npm run dev');
+    console.log('1. Start the API server: npm run dev');
     console.log('');
   } catch (error) {
     console.error('\n❌ Setup failed:', error.message);

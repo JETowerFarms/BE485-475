@@ -1,6 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const { queries } = require('../database');
+const fs = require('fs');
+const path = require('path');
+
+// GET /api/geo/michigan-mcd
+// Get Michigan MCD (Minor Civil Divisions) GeoJSON data
+router.get('/michigan-mcd', async (req, res, next) => {
+  try {
+    const mcdPath = path.join(__dirname, '../../data/michiganMCDFull.json');
+    const mcdData = JSON.parse(fs.readFileSync(mcdPath, 'utf8'));
+    
+    res.json(mcdData);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // GET /api/geo/counties
 // Get all Michigan counties

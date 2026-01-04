@@ -14,6 +14,7 @@ dotenv.config();
 const solarRoutes = require('./routes/solar');
 const farmRoutes = require('./routes/farms');
 const geoRoutes = require('./routes/geo');
+const cropRoutes = require('./routes/crops');
 
 // Create Express app
 const app = express();
@@ -65,6 +66,7 @@ app.get('/health', (req, res) => {
 app.use('/api/solar', solarRoutes);
 app.use('/api/farms', farmRoutes);
 app.use('/api/geo', geoRoutes);
+app.use('/api/crops', cropRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -75,6 +77,7 @@ app.get('/', (req, res) => {
       solar: '/api/solar',
       farms: '/api/farms',
       geo: '/api/geo',
+      crops: '/api/crops',
       health: '/health',
     },
   });
@@ -105,28 +108,46 @@ app.use((err, req, res, next) => {
 // Start server
 async function startServer() {
   try {
-    // Test database connection
+    // Test database connection (optional - server can run without DB for static endpoints)
     const dbConnected = await testConnection();
     if (!dbConnected) {
-      console.error('Failed to connect to database. Exiting...');
-      process.exit(1);
+      console.warn('⚠ Database connection failed. Some endpoints may not work.');
     }
 
     // Start listening
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`\n✓ Michigan Solar API Server running`);
       console.log(`✓ Port: ${PORT}`);
       console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`✓ API Base URL: http://localhost:${PORT}/api`);
       console.log(`\nAvailable endpoints:`);
-      console.log(`  GET  /health`);
-      console.log(`  GET  /api/solar/point/:lat/:lng`);
-      console.log(`  GET  /api/solar/bbox`);
-      console.log(`  POST /api/solar/polygon`);
-      console.log(`  GET  /api/farms`);
-      console.log(`  POST /api/farms`);
-      console.log(`  GET  /api/geo/counties`);
-      console.log(`  GET  /api/geo/cities/:countyId`);
+      
+      // Dynamically list all registered routes
+      const routes = [];
+      app._router.stack.forEach((middleware) => {
+        if (middleware.route) {
+          // Routes registered directly on the app
+          const methods = Object.keys(middleware.route.methods).map(m => m.toUpperCase()).join(', ');
+          routes.push(`  ${methods.padEnd(6)} ${middleware.route.path}`);
+        } else if (middleware.name === 'router') {
+          // Routes registered via router
+          middleware.handle.stack.forEach((handler) => {
+            if (handler.route) {
+              const methods = Object.keys(handler.route.methods).map(m => m.toUpperCase()).join(', ');
+              // Extract base path from router regex
+              let basePath = '';
+              const regexStr = middleware.regexp.source;
+              const match = regexStr.match(/^\\\/([^\\?]*)/);
+              if (match) {
+                basePath = '/' + match[1].replace(/\\\//g, '/');
+              }
+              routes.push(`  ${methods.padEnd(6)} ${basePath}${handler.route.path}`);
+            }
+          });
+        }
+      });
+      
+      routes.sort().forEach(route => console.log(route));
       console.log(`\n`);
     });
   } catch (error) {

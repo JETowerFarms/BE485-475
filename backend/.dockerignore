@@ -16,5 +16,4 @@ Thumbs.db
 *.swo
 *~
 test-setup.js
-scripts/import-solar-data.js
 .editorconfig

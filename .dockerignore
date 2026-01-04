@@ -20,5 +20,3 @@ mcd_shp
 temp_transmission
 notes
 migration_configs
-# Keep the solar data file for import
-!michiganSolarSuitability_30x30.json
