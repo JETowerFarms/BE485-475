@@ -17,3 +17,9 @@ RUN chmod +x /usr/local/bin/import_vector_zip
 
 COPY import_nlcd_raster.sh /usr/local/bin/import_nlcd_raster
 RUN chmod +x /usr/local/bin/import_nlcd_raster
+
+COPY import_landfire_slope_raster.sh /usr/local/bin/import_landfire_slope_raster
+RUN chmod +x /usr/local/bin/import_landfire_slope_raster
+
+COPY import_gpw_population_density_raster.sh /usr/local/bin/import_gpw_population_density_raster
+RUN chmod +x /usr/local/bin/import_gpw_population_density_raster

@@ -264,6 +264,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
     message: '',
     onConfirm: () => {},
   });
+  const [isBuildingFarm, setIsBuildingFarm] = useState(false);
 
   // Find the selected city data and calculate centroid
   const cityData = useMemo(() => {
@@ -328,111 +329,117 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
   };
 
   const handleBuildFarm = async () => {
-    if (pins.length < 3) {
-      // Need at least 3 points to make a polygon
+    if (pins.length < 3 || isBuildingFarm) {
+      // Need at least 3 points to make a polygon and avoid duplicate submissions
       return;
     }
 
-    // Connect-the-dots: preserve the user's pin placement order.
-    const orderedPins = pins;
+    setIsBuildingFarm(true);
 
-    // Store the farm polygon coordinates in GeoJSON format (ring)
-    const coordinates = orderedPins.map((pin) => [pin.longitude, pin.latitude]);
-    // Close the polygon by adding the first point at the end
-    coordinates.push(coordinates[0]);
-    
-    const farmId = Date.now().toString();
-    
-    // Fetch analysis data from backend - REQUIRED for all farms
-    let backendAnalysis = null;
     try {
-      const response = await fetch(buildApiUrl('/farms/analyze'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ farmId, coordinates, county, city })
-      });
+      // Connect-the-dots: preserve the user's pin placement order.
+      const orderedPins = pins;
+
+      // Store the farm polygon coordinates in GeoJSON format (ring)
+      const coordinates = orderedPins.map((pin) => [pin.longitude, pin.latitude]);
+      // Close the polygon by adding the first point at the end
+      coordinates.push(coordinates[0]);
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Backend API error (${response.status}): ${errorText}`);
-      }
+      const farmId = Date.now().toString();
       
-      backendAnalysis = await response.json();
-      
-      // Import SOLAR_DATA_CACHE from FarmDescriptionScreen
-      const { SOLAR_DATA_CACHE } = require('../screens/FarmDescriptionScreen');
-      
-      // Pre-populate SOLAR_DATA_CACHE with backend results
-      if (backendAnalysis.solarDataPoints) {
-        backendAnalysis.solarDataPoints.forEach(point => {
-          const cacheKey = `${point.lat.toFixed(6)}_${point.lng.toFixed(6)}`;
-          SOLAR_DATA_CACHE.set(cacheKey, {
-            overall: point.overall,
-            land_cover: point.land_cover,
-            slope: point.slope,
-            transmission: point.transmission,
-            population: point.population,
-            score: point.overall,
-            substation: point.transmission
-          });
+      // Fetch analysis data from backend - REQUIRED for all farms
+      let backendAnalysis = null;
+      try {
+        const response = await fetch(buildApiUrl('/farms/analyze'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ farmId, coordinates, county, city })
         });
         
-        console.log(`Backend analysis complete: ${backendAnalysis.dataPointCount} points in ${backendAnalysis.processingTimeMs}ms`);
-        console.log(`Avg suitability: ${backendAnalysis.metadata.avgSuitability}`);
-        console.log(`Solar grid: ${backendAnalysis.solarHeatMapGrid.width}x${backendAnalysis.solarHeatMapGrid.height}, ${backendAnalysis.solarHeatMapGrid.cells.length} cells`);
-        console.log(`Elevation grid: ${backendAnalysis.elevationHeatMapGrid.width}x${backendAnalysis.elevationHeatMapGrid.height}, ${backendAnalysis.elevationHeatMapGrid.cells.length} cells`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Backend API error (${response.status}): ${errorText}`);
+        }
+        
+        backendAnalysis = await response.json();
+        
+        // Import SOLAR_DATA_CACHE from FarmDescriptionScreen
+        const { SOLAR_DATA_CACHE } = require('../screens/FarmDescriptionScreen');
+        
+        // Pre-populate SOLAR_DATA_CACHE with backend results
+        if (backendAnalysis.solarDataPoints) {
+          backendAnalysis.solarDataPoints.forEach(point => {
+            const cacheKey = `${point.lat.toFixed(6)}_${point.lng.toFixed(6)}`;
+            SOLAR_DATA_CACHE.set(cacheKey, {
+              overall: point.overall,
+              land_cover: point.land_cover,
+              slope: point.slope,
+              transmission: point.transmission,
+              population: point.population,
+              score: point.overall,
+              substation: point.transmission
+            });
+          });
+          
+          console.log(`Backend analysis complete: ${backendAnalysis.dataPointCount} points in ${backendAnalysis.processingTimeMs}ms`);
+          console.log(`Avg suitability: ${backendAnalysis.metadata.avgSuitability}`);
+          console.log(`Solar grid: ${backendAnalysis.solarHeatMapGrid.width}x${backendAnalysis.solarHeatMapGrid.height}, ${backendAnalysis.solarHeatMapGrid.cells.length} cells`);
+          console.log(`Elevation grid: ${backendAnalysis.elevationHeatMapGrid.width}x${backendAnalysis.elevationHeatMapGrid.height}, ${backendAnalysis.elevationHeatMapGrid.cells.length} cells`);
+        }
+      } catch (error) {
+        console.error('Backend API call failed:', error);
+        Alert.alert(
+          'Cannot Build Farm',
+          `Failed to analyze farm data from backend server.\n\nError: ${error.message}\n\nPlease ensure the backend server is running on port 3001.`,
+          [{ text: 'OK' }]
+        );
+        return; // Don't create farm without backend data
       }
-    } catch (error) {
-      console.error('Backend API call failed:', error);
-      Alert.alert(
-        'Cannot Build Farm',
-        `Failed to analyze farm data from backend server.\n\nError: ${error.message}\n\nPlease ensure the backend server is running on port 3001.`,
-        [{ text: 'OK' }]
-      );
-      return; // Don't create farm without backend data
+      
+      // Validate backend data structure
+      if (!backendAnalysis?.solarHeatMapGrid || !backendAnalysis?.elevationHeatMapGrid) {
+        console.error('Invalid backend response:', backendAnalysis);
+        Alert.alert(
+          'Invalid Backend Data',
+          'The backend returned incomplete data. Missing heat map grids.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      // Convert current pins to blue farm pins
+      const bluePins = orderedPins.map((pin) => ({
+        ...pin,
+        color: '#3B82F6', // Blue color for farm pins
+        farmId: farmId,
+      }));
+      
+      const farm = {
+        id: farmId,
+        type: 'Feature',
+        properties: {
+          name: `Farm ${farms.length + 1}`,
+          county: county,
+          city: city,
+          createdAt: new Date().toISOString(),
+          pinCount: orderedPins.length,
+          avgSuitability: backendAnalysis.metadata.avgSuitability, // Required from backend
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [coordinates],
+        },
+        pins: bluePins, // Store the pins with the farm
+        backendAnalysis, // Store complete backend analysis (validated above)
+      };
+      
+      setFarmPins(currentFarmPins => [...currentFarmPins, ...bluePins]);
+      setFarms(currentFarms => [...currentFarms, farm]);
+      setPins([]); // Clear current pins for next farm
+      console.log('Farm polygon created:', JSON.stringify(farm, null, 2));
+    } finally {
+      setIsBuildingFarm(false);
     }
-    
-    // Validate backend data structure
-    if (!backendAnalysis?.solarHeatMapGrid || !backendAnalysis?.elevationHeatMapGrid) {
-      console.error('Invalid backend response:', backendAnalysis);
-      Alert.alert(
-        'Invalid Backend Data',
-        'The backend returned incomplete data. Missing heat map grids.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    
-    // Convert current pins to blue farm pins
-    const bluePins = orderedPins.map((pin) => ({
-      ...pin,
-      color: '#3B82F6', // Blue color for farm pins
-      farmId: farmId,
-    }));
-    
-    const farm = {
-      id: farmId,
-      type: 'Feature',
-      properties: {
-        name: `Farm ${farms.length + 1}`,
-        county: county,
-        city: city,
-        createdAt: new Date().toISOString(),
-        pinCount: orderedPins.length,
-        avgSuitability: backendAnalysis.metadata.avgSuitability, // Required from backend
-      },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [coordinates],
-      },
-      pins: bluePins, // Store the pins with the farm
-      backendAnalysis, // Store complete backend analysis (validated above)
-    };
-    
-    setFarmPins(currentFarmPins => [...currentFarmPins, ...bluePins]);
-    setFarms(currentFarms => [...currentFarms, farm]);
-    setPins([]); // Clear current pins for next farm
-    console.log('Farm polygon created:', JSON.stringify(farm, null, 2));
   };
 
   // Open farms list modal
@@ -689,6 +696,16 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
           style={styles.map}
         />
 
+        {isBuildingFarm && (
+          <View style={styles.buildingOverlay}>
+            <ActivityIndicator size="large" color="#FFFFFF" />
+            <Text style={styles.buildingOverlayText}>Building farm...</Text>
+            <Text style={styles.buildingOverlaySubtext}>
+              Crunching solar, elevation, and landcover layers.
+            </Text>
+          </View>
+        )}
+
         {/* Control Panel Overlay */}
         <View style={styles.controlPanel}>
           {/* Header Row: Title and Clear Pins */}
@@ -725,17 +742,17 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
             <Pressable
               style={({ pressed }) => [
                 styles.buildFarmButton,
-                pins.length < 3 && styles.buildFarmButtonDisabled,
-                pressed && pins.length >= 3 && styles.buildFarmButtonPressed,
+                (pins.length < 3 || isBuildingFarm) && styles.buildFarmButtonDisabled,
+                pressed && pins.length >= 3 && !isBuildingFarm && styles.buildFarmButtonPressed,
               ]}
               onPress={handleBuildFarm}
-              disabled={pins.length < 3}
+              disabled={pins.length < 3 || isBuildingFarm}
             >
               <Text style={[
                 styles.buildFarmButtonText,
-                pins.length < 3 && styles.buildFarmButtonTextDisabled,
+                (pins.length < 3 || isBuildingFarm) && styles.buildFarmButtonTextDisabled,
               ]}>
-                Build Farm
+                {isBuildingFarm ? 'Building...' : 'Build Farm'}
               </Text>
             </Pressable>
             
@@ -1100,6 +1117,30 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  buildingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  buildingOverlayText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 12,
+  },
+  buildingOverlaySubtext: {
+    color: '#E0E0E0',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 16,
   },
   controlPanel: {
     position: 'absolute',

@@ -8,10 +8,10 @@ import {
   StatusBar,
   BackHandler,
   ActivityIndicator,
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import MichiganMap from '../components/MichiganMap';
-import { isTargetCounty } from '../data/michiganCounties';
-import { loadLocation } from '../utils/locationStorage';
 
 // Color scheme matching the reference design
 const COLORS = {
@@ -23,23 +23,23 @@ const COLORS = {
   exitRedBorder: '#A03030',  // Darker red for border
 };
 
-const HomeScreen = ({ onNavigateToCity, shouldAutoNavigate = true }) => {
+const HomeScreen = ({
+  onNavigateToCity,
+  savedLocation,
+  onResumeSavedLocation,
+  isLoadingInitial = false,
+}) => {
   const [selectedCounty, setSelectedCounty] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const hasSavedLocation = Boolean(savedLocation?.county && savedLocation?.city);
+  const [isResumeModalVisible, setIsResumeModalVisible] = useState(false);
 
-  // Load saved location on mount (only auto-navigate if allowed)
   useEffect(() => {
-    const loadSavedLocation = async () => {
-      const { county, city } = await loadLocation();
-      if (county && city && onNavigateToCity && shouldAutoNavigate) {
-        // Auto-navigate to saved location
-        console.log('Auto-navigating to saved location:', city, county);
-        onNavigateToCity(county, city);
-      }
-      setIsLoading(false);
-    };
-    loadSavedLocation();
-  }, [onNavigateToCity, shouldAutoNavigate]);
+    if (hasSavedLocation) {
+      setIsResumeModalVisible(true);
+    } else {
+      setIsResumeModalVisible(false);
+    }
+  }, [hasSavedLocation]);
 
   const handleCountyPress = (county) => {
     // Single select: toggle selection or select new county
@@ -60,7 +60,16 @@ const HomeScreen = ({ onNavigateToCity, shouldAutoNavigate = true }) => {
     BackHandler.exitApp();
   };
 
-  if (isLoading) {
+  const handleResume = () => {
+    onResumeSavedLocation?.();
+    setIsResumeModalVisible(false);
+  };
+
+  const handleDismissModal = () => {
+    setIsResumeModalVisible(false);
+  };
+
+  if (isLoadingInitial) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
@@ -115,11 +124,104 @@ const HomeScreen = ({ onNavigateToCity, shouldAutoNavigate = true }) => {
           </Text>
         </Pressable>
       </View>
+
+      <Modal
+        transparent
+        animationType="fade"
+        visible={isResumeModalVisible}
+        onRequestClose={handleDismissModal}
+      >
+        <TouchableWithoutFeedback onPress={handleDismissModal}>
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Resume previous location?</Text>
+                <Text style={styles.modalMessage}>
+                  {savedLocation?.city}, {savedLocation?.county} County
+                </Text>
+                <View style={styles.modalButtons}>
+                  <Pressable
+                    style={({ pressed }) => [styles.modalSecondary, pressed && styles.buttonPressed]}
+                    onPress={handleDismissModal}
+                  >
+                    <Text style={styles.modalSecondaryText}>Not Now</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [styles.modalPrimary, pressed && styles.buttonPressed]}
+                    onPress={handleResume}
+                  >
+                    <Text style={styles.modalPrimaryText}>Continue Here</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+    },
+    modalContent: {
+      width: '100%',
+      backgroundColor: '#FFFDF8',
+      padding: 24,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: '#5A554E',
+      alignItems: 'center',
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: COLORS.text,
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    modalMessage: {
+      fontSize: 18,
+      color: '#4A4438',
+      marginBottom: 20,
+      textAlign: 'center',
+    },
+    modalButtons: {
+      width: '100%',
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 12,
+    },
+    modalSecondary: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderWidth: 2,
+      borderColor: '#A0A0A0',
+      backgroundColor: '#FFFFFF',
+    },
+    modalSecondaryText: {
+      color: '#6B665D',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    modalPrimary: {
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderWidth: 2,
+      borderColor: '#5A7A5A',
+      backgroundColor: '#7A9A7A',
+    },
+    modalPrimaryText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '700',
+    },
   container: {
     flex: 1,
     backgroundColor: COLORS.background,

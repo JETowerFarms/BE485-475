@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { StatusBar } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { StatusBar, View } from 'react-native';
 import { loadFarms as loadFarmsFromStorage, saveFarms as saveFarmsToStorage } from './src/utils/farmStorage';
+import { loadLocation } from './src/utils/locationStorage';
 import { buildApiUrl } from './src/config/apiConfig';
 import HomeScreen from './src/screens/HomeScreen';
 import CitySelectionScreen from './src/screens/CitySelectionScreen';
@@ -20,7 +20,20 @@ export default function App() {
   const [isLoadingFarms, setIsLoadingFarms] = useState(true);
   const [mcdData, setMcdData] = useState(null);
   const [isLoadingMcdData, setIsLoadingMcdData] = useState(false);
-  const [hasAutoNavigated, setHasAutoNavigated] = useState(false);
+  const [savedLocation, setSavedLocation] = useState(null);
+  const [isLoadingSavedLocation, setIsLoadingSavedLocation] = useState(true);
+  useEffect(() => {
+    const loadSavedLocation = async () => {
+      const storedLocation = await loadLocation();
+      if (storedLocation?.county && storedLocation?.city) {
+        setSavedLocation(storedLocation);
+      }
+      setIsLoadingSavedLocation(false);
+    };
+
+    loadSavedLocation();
+  }, []);
+
 
   // Load farms from storage on app start
   useEffect(() => {
@@ -63,15 +76,21 @@ export default function App() {
 
   const handleNavigateToCity = (county, city = null) => {
     setSelectedCounty(county);
-    setHasAutoNavigated(true); // Mark that we've navigated (disable future auto-nav)
     if (city) {
-      // Auto-navigate directly to map if city is provided
       setSelectedCity(city);
       setCurrentScreen('map');
     } else {
       setCurrentScreen('citySelection');
     }
   };
+  const handleResumeSavedLocation = () => {
+    if (savedLocation?.county && savedLocation?.city) {
+      setSelectedCounty(savedLocation.county);
+      setSelectedCity(savedLocation.city);
+      setCurrentScreen('map');
+    }
+  };
+
 
   const handleNavigateToPin = (county, city) => {
     setSelectedCity(city);
@@ -112,12 +131,14 @@ export default function App() {
   // if (SHOW_TEST) return <TestPathRendering />;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <View style={{ flex: 1 }}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       {currentScreen === 'home' && (
         <HomeScreen 
           onNavigateToCity={handleNavigateToCity}
-          shouldAutoNavigate={!hasAutoNavigated}
+          savedLocation={savedLocation}
+          isLoadingInitial={isLoadingSavedLocation || isLoadingFarms}
+          onResumeSavedLocation={handleResumeSavedLocation}
         />
       )}
       {currentScreen === 'citySelection' && selectedCounty && (
@@ -150,6 +171,6 @@ export default function App() {
           onNavigateNext={handleNavigateToNextForm}
         />
       )}
-    </GestureHandlerRootView>
+    </View>
   );
 }

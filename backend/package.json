@@ -9,6 +9,8 @@
     "db:setup": "node scripts/setup-database.js",
     "db:migrate": "node scripts/migrate.js",
     "pricing:refresh": "node scripts/refresh-pricing-snapshot.js",
+    "solar:substations": "node scripts/import-substations.js",
+    "solar:chunks": "node scripts/generate-solar-suitability-chunks.js",
     "test": "jest"
   },
   "keywords": [

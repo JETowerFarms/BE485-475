@@ -8,6 +8,11 @@ const {
   isFullyWaterFromNlcd,
 } = require('../landcover');
 const { getOrCreatePricingSnapshot } = require('../pricing');
+const {
+  calculateAverageSolarScores,
+  generateSolarHeatMapGrid,
+  getSolarScoreDistribution,
+} = require('../solar-suitability');
 
 // Validation schemas
 const createFarmSchema = Joi.object({
@@ -791,15 +796,12 @@ router.post('/analyze', async (req, res, next) => {
       population: parseFloat(point.population_score),
     }));
 
-    // Calculate average suitability
-    let avgSuitability = 0;
-    if (formattedPoints.length > 0) {
-      const sum = formattedPoints.reduce((acc, p) => acc + p.overall, 0);
-      avgSuitability = sum / formattedPoints.length;
-    }
+    // Calculate average suitability using solar-suitability module
+    const solarScores = calculateAverageSolarScores(solarDataPoints);
+    const solarDistribution = getSolarScoreDistribution(solarDataPoints);
 
     // Generate solar heat map grid with pre-computed colors
-    const solarHeatMapGrid = generateHeatMapGrid(formattedPoints, bounds, 50);
+    const solarHeatMapGrid = generateSolarHeatMapGrid(solarDataPoints, bounds, 50);
 
     // Generate elevation heat map grid with pre-computed colors
     const elevationHeatMapGrid = generateElevationHeatMapGrid(formattedPoints, bounds, 50);
@@ -927,7 +929,21 @@ router.post('/analyze', async (req, res, next) => {
         area,
         bounds,
         centroid,
-        avgSuitability: parseFloat(avgSuitability.toFixed(2)),
+        avgSuitability: parseFloat(solarScores.overall.toFixed(2)),
+        solarScores: {
+          overall: parseFloat(solarScores.overall.toFixed(2)),
+          landCover: parseFloat(solarScores.landCover.toFixed(2)),
+          slope: parseFloat(solarScores.slope.toFixed(2)),
+          transmission: parseFloat(solarScores.transmission.toFixed(2)),
+          population: parseFloat(solarScores.population.toFixed(2)),
+        },
+        solarDistribution: {
+          min: parseFloat(solarDistribution.min.toFixed(2)),
+          max: parseFloat(solarDistribution.max.toFixed(2)),
+          median: parseFloat(solarDistribution.median.toFixed(2)),
+          q25: parseFloat(solarDistribution.q25.toFixed(2)),
+          q75: parseFloat(solarDistribution.q75.toFixed(2)),
+        },
       },
       solarDataPoints: formattedPoints,
       solarHeatMapGrid,

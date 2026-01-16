@@ -24,7 +24,6 @@ backend/
 │       └── geo.js            # Geographic data endpoints
 ├── scripts/
 │   ├── setup-database.js     # Database initialization
-│   └── import-solar-data.js  # Import 30x30 grid data
 ├── DATABASE_SCHEMA.sql       # Complete database schema
 ├── package.json
 └── .env.example
@@ -282,6 +281,15 @@ GET /api/geo/cities/:countyId
 **calculate_farm_suitability(boundary)** - Analyze farm area
 
 **get_solar_data_bbox(minLat, minLng, maxLat, maxLng)** - Query rectangle
+
+### Solar Suitability Regeneration
+
+1. **Load rasters/vectors** – Import NLCD 2024, LandFire 2020 slope, and GPW v4 population rasters into PostGIS tables `landcover_nlcd_2024_raster`, `landfire_slope_2020_raster`, and `gpw_population_density_2020_raster`. Load the provided MISubstations GeoJSON via `npm run solar:substations` (writes to `energy_substations`).
+2. **Install sampling functions** – `psql -d <db> -f backend/sql/solar_inputs.sql` adds scoring helpers plus `solar_sample_inputs(lat, lng)`.
+3. **Generate & insert (direct to DB)** – `npm run solar:chunks` streams grid points, samples real datasets via `solar_sample_inputs`, and inserts directly into `solar_suitability` in large batches.
+4. **Verify** – `SELECT COUNT(*) FROM solar_suitability;` and hit `/api/solar/stats` to confirm averages align with EGLE weightings (Land cover 40%, Substation 30%, Slope 20%, Population 10%).
+
+Environment overrides: `GRID_LAT_MIN`, `GRID_LAT_MAX`, `GRID_LNG_MIN`, `GRID_LNG_MAX`, `GRID_SPACING`.
 
 ## Performance
 
