@@ -1,239 +1,105 @@
--- Michigan Solar Optimization Tool
--- Database schema (PostgreSQL + PostGIS)
+-- Michigan Solar Optimization Database Schema
+-- This file contains the complete database schema for the Michigan Solar Optimization Tool
 
+-- Enable PostGIS extension (skip if already exists)
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- Core grid dataset
-CREATE TABLE IF NOT EXISTS solar_suitability (
-  lat DOUBLE PRECISION NOT NULL,
-  lng DOUBLE PRECISION NOT NULL,
-  overall_score DOUBLE PRECISION,
-  land_cover_score DOUBLE PRECISION,
-  slope_score DOUBLE PRECISION,
-  transmission_score DOUBLE PRECISION,
-  population_score DOUBLE PRECISION,
-  PRIMARY KEY (lat, lng)
-);
+-- Create custom functions for solar suitability scoring (skip if already exist)
+CREATE OR REPLACE FUNCTION score_landcover(nlcd_code integer)
+RETURNS integer AS $$
+BEGIN
+  CASE nlcd_code
+    WHEN 11 THEN RETURN 100; -- Open water
+    WHEN 12 THEN RETURN 100; -- Perennial ice/snow
+    WHEN 21 THEN RETURN 90;  -- Developed, open space
+    WHEN 22 THEN RETURN 70;  -- Developed, low intensity
+    WHEN 23 THEN RETURN 50;  -- Developed, medium intensity
+    WHEN 24 THEN RETURN 30;  -- Developed, high intensity
+    WHEN 31 THEN RETURN 100; -- Barren land
+    WHEN 32 THEN RETURN 100; -- Unconsolidated shore
+    WHEN 41 THEN RETURN 80;  -- Deciduous forest
+    WHEN 42 THEN RETURN 80;  -- Evergreen forest
+    WHEN 43 THEN RETURN 80;  -- Mixed forest
+    WHEN 51 THEN RETURN 100; -- Dwarf scrub
+    WHEN 52 THEN RETURN 100; -- Shrub/scrub
+    WHEN 71 THEN RETURN 100; -- Grassland/herbaceous
+    WHEN 72 THEN RETURN 100; -- Sedge/herbaceous
+    WHEN 73 THEN RETURN 100; -- Lichens
+    WHEN 74 THEN RETURN 100; -- Moss
+    WHEN 81 THEN RETURN 100; -- Pasture/hay
+    WHEN 82 THEN RETURN 100; -- Cultivated crops
+    WHEN 90 THEN RETURN 100; -- Woody wetlands
+    WHEN 95 THEN RETURN 100; -- Emergent herbaceous wetlands
+    ELSE RETURN 60; -- Default for unknown values
+  END CASE;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
 
-CREATE INDEX IF NOT EXISTS idx_solar_suitability_lat_lng
-  ON solar_suitability (lat, lng);
+-- Skip creating functions that already exist
+-- score_slope, score_population, score_transmission_distance already exist
 
--- Nearest-point lookup (approximate ordering, precise meters via haversine)
-CREATE OR REPLACE FUNCTION get_nearest_solar_point(p_lat DOUBLE PRECISION, p_lng DOUBLE PRECISION)
-RETURNS TABLE (
-  lat DOUBLE PRECISION,
-  lng DOUBLE PRECISION,
-  overall_score DOUBLE PRECISION,
-  land_cover_score DOUBLE PRECISION,
-  slope_score DOUBLE PRECISION,
-  transmission_score DOUBLE PRECISION,
-  population_score DOUBLE PRECISION,
-  distance_m DOUBLE PRECISION
-)
-LANGUAGE sql
-STABLE
-AS $$
-  WITH candidates AS (
-    SELECT s.*,
-           ((s.lat - p_lat) * (s.lat - p_lat) + (s.lng - p_lng) * (s.lng - p_lng)) AS dist2
-    FROM solar_suitability s
-    ORDER BY dist2
-    LIMIT 1
-  )
-  SELECT
-    c.lat,
-    c.lng,
-    c.overall_score,
-    c.land_cover_score,
-    c.slope_score,
-    c.transmission_score,
-    c.population_score,
-    (2 * 6371000 * asin(
-      sqrt(
-        pow(sin(radians((c.lat - p_lat) / 2)), 2)
-        + cos(radians(p_lat)) * cos(radians(c.lat))
-        * pow(sin(radians((c.lng - p_lng) / 2)), 2)
-      )
-    )) AS distance_m
-  FROM candidates c;
-$$;
-
--- Aggregate stats used by /api/solar/stats
-CREATE OR REPLACE VIEW solar_suitability_stats AS
-SELECT
-  COUNT(*)::BIGINT AS total_points,
-  AVG(overall_score) AS avg_overall,
-  MIN(overall_score) AS min_overall,
-  MAX(overall_score) AS max_overall,
-  STDDEV_POP(overall_score) AS stddev_overall,
-  percentile_cont(0.25) WITHIN GROUP (ORDER BY overall_score) AS q1_overall,
-  percentile_cont(0.50) WITHIN GROUP (ORDER BY overall_score) AS median_overall,
-  percentile_cont(0.75) WITHIN GROUP (ORDER BY overall_score) AS q3_overall
-FROM solar_suitability
-WHERE overall_score IS NOT NULL;
-
--- Farm persistence (optional, but required by existing API queries)
+-- Create tables (skip if already exist)
 CREATE TABLE IF NOT EXISTS farms (
-  id BIGSERIAL PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  name TEXT NOT NULL,
-  boundary GEOGRAPHY(POLYGON, 4326) NOT NULL,
-  area_acres DOUBLE PRECISION,
-  centroid GEOGRAPHY(POINT, 4326),
-  avg_suitability DOUBLE PRECISION,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    boundary GEOGRAPHY(POLYGON, 4326) NOT NULL,
+    area_acres DOUBLE PRECISION,
+    centroid GEOGRAPHY(POINT, 4326),
+    avg_suitability DOUBLE PRECISION,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_farms_user_id
-  ON farms (user_id);
-
-CREATE TABLE IF NOT EXISTS farm_analysis (
-  farm_id BIGINT PRIMARY KEY REFERENCES farms(id) ON DELETE CASCADE,
-  total_points INTEGER,
-  avg_overall DOUBLE PRECISION,
-  avg_land_cover DOUBLE PRECISION,
-  avg_slope DOUBLE PRECISION,
-  avg_transmission DOUBLE PRECISION,
-  avg_population DOUBLE PRECISION,
-  min_score DOUBLE PRECISION,
-  max_score DOUBLE PRECISION,
-  suitable_area_acres DOUBLE PRECISION,
-  analysis_data JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS county_bboxes (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    bbox GEOMETRY(POLYGON, 4326) NOT NULL,
+    bbox_5070 GEOMETRY(POLYGON, 5070) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Optional geo tables used by /api/geo endpoints
-CREATE TABLE IF NOT EXISTS counties (
-  id BIGSERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  fips_code TEXT,
-  boundary GEOGRAPHY(MULTIPOLYGON, 4326)
+CREATE TABLE IF NOT EXISTS substations (
+    id SERIAL PRIMARY KEY,
+    properties JSONB,
+    geom GEOMETRY(POINT, 4326),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS cities (
-  id BIGSERIAL PRIMARY KEY,
-  county_id BIGINT REFERENCES counties(id) ON DELETE SET NULL,
-  name TEXT NOT NULL,
-  population BIGINT,
-  location GEOGRAPHY(POINT, 4326)
+-- Create indexes (skip if already exist)
+CREATE INDEX IF NOT EXISTS idx_farms_boundary ON farms USING GIST (boundary);
+CREATE INDEX IF NOT EXISTS idx_farms_user_id ON farms (user_id);
+CREATE INDEX IF NOT EXISTS idx_county_bboxes_bbox ON county_bboxes USING GIST (bbox);
+CREATE INDEX IF NOT EXISTS idx_county_bboxes_bbox_5070 ON county_bboxes USING GIST (bbox_5070);
+CREATE INDEX IF NOT EXISTS idx_substations_geom ON substations USING GIST (geom);
+
+-- Create raster tables (skip if already exist)
+CREATE TABLE IF NOT EXISTS landcover_nlcd_2024_raster (
+    rid SERIAL PRIMARY KEY,
+    rast RASTER,
+    filename TEXT
 );
 
--- Crop reference data (for Michigan-focused agricultural workflows)
-CREATE TABLE IF NOT EXISTS crops (
-  id BIGSERIAL PRIMARY KEY,
-  crop TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  category TEXT,
-  -- Yield is stored as kg/ha; basis indicates whether values are fresh weight, dry matter, or grain at standard moisture
-  -- yield_basis_code: 1=grain_std_moisture, 2=fresh_weight, 3=dry_matter
-  yield_basis_code SMALLINT NOT NULL DEFAULT 2,
-  yield_moisture_percent DOUBLE PRECISION,
-  yield_low_kg_ha DOUBLE PRECISION,
-  yield_typical_kg_ha DOUBLE PRECISION,
-  yield_high_kg_ha DOUBLE PRECISION,
-  -- Seasonal water requirement (approx ETc) in mm across the growing season
-  water_low_mm_season DOUBLE PRECISION,
-  water_high_mm_season DOUBLE PRECISION,
-  -- Simple sunlight proxy (direct sun hours/day)
-  sun_hours_min DOUBLE PRECISION,
-  sun_hours_optimal DOUBLE PRECISION,
-  notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS slope_raster (
+    rid SERIAL PRIMARY KEY,
+    rast RASTER,
+    filename TEXT
 );
 
--- Nutrient requirements keyed by crop
-CREATE TABLE IF NOT EXISTS crop_nutrient_requirements (
-  crop_id BIGINT PRIMARY KEY REFERENCES crops(id) ON DELETE CASCADE,
-  -- Macronutrients in kg/ha as fertilizer application rate ranges (soil-test dependent)
-  n_low_kg_ha DOUBLE PRECISION,
-  n_high_kg_ha DOUBLE PRECISION,
-  p2o5_low_kg_ha DOUBLE PRECISION,
-  p2o5_high_kg_ha DOUBLE PRECISION,
-  k2o_low_kg_ha DOUBLE PRECISION,
-  k2o_high_kg_ha DOUBLE PRECISION,
-  other_nutrients JSONB,
-  notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS population_raster (
+    rid SERIAL PRIMARY KEY,
+    rast RASTER,
+    filename TEXT
 );
 
--- Seed: crops common in Michigan (idempotent)
-INSERT INTO crops (
-  crop,
-  name,
-  category,
-  yield_basis_code,
-  yield_moisture_percent,
-  yield_low_kg_ha,
-  yield_typical_kg_ha,
-  yield_high_kg_ha,
-  water_low_mm_season,
-  water_high_mm_season,
-  sun_hours_min,
-  sun_hours_optimal,
-  notes
-)
-VALUES
-  -- Grains are stored at standard moisture (corn ~15.5%, soy/wheat ~13%).
-  ('corn_grain', 'Corn (grain)', 'row_crop', 1, 15.5, 9000, 11400, 13000, 450, 650, 6, 8, NULL),
-  ('soybeans', 'Soybeans', 'row_crop', 1, 13.0, 2500, 3000, 3500, 350, 550, 6, 8, NULL),
-  ('wheat', 'Wheat', 'grain', 1, 13.0, 5000, 6000, 7000, 300, 450, 6, 8, NULL),
-  ('dry_beans', 'Dry beans', 'legume', 2, NULL, 2000, 2500, 3000, 300, 450, 6, 8, NULL),
-  ('sugar_beets', 'Sugar beets', 'row_crop', 2, NULL, 50000, 60000, 70000, 550, 750, 6, 8, NULL),
-  ('potatoes', 'Potatoes', 'vegetable', 2, NULL, 40000, 45000, 50000, 400, 600, 6, 8, NULL),
-  ('tart_cherries', 'Tart cherries', 'fruit', 2, NULL, 10000, 12500, 15000, 300, 500, 6, 8, NULL),
-  ('apples', 'Apples', 'fruit', 2, NULL, 30000, 35000, 40000, 300, 500, 6, 8, NULL),
-  ('blueberries', 'Blueberries', 'fruit', 2, NULL, 6000, 8000, 10000, 350, 550, 6, 8, 'Often managed for acidic soils'),
-  ('grapes', 'Grapes', 'fruit', 2, NULL, 8000, 10000, 12000, 350, 550, 6, 8, NULL),
-  ('cucumbers', 'Cucumbers', 'vegetable', 2, NULL, 20000, 25000, 30000, 350, 500, 6, 8, NULL),
-  ('tomatoes', 'Tomatoes', 'vegetable', 2, NULL, 40000, 50000, 60000, 400, 600, 6, 8, NULL),
-  ('asparagus', 'Asparagus', 'vegetable', 2, NULL, 5000, 6000, 7000, 300, 450, 6, 8, NULL),
-  ('carrots', 'Carrots', 'vegetable', 2, NULL, 30000, 35000, 40000, 300, 450, 6, 8, NULL),
-  ('onions', 'Onions', 'vegetable', 2, NULL, 30000, 35000, 40000, 300, 450, 6, 8, NULL),
-  ('alfalfa_hay', 'Alfalfa / hay', 'forage', 3, 0.0, 6000, 7000, 8000, 600, 800, 6, 8, 'Yield is dry matter (DM)')
-ON CONFLICT (crop) DO NOTHING;
+-- Create raster indexes (skip if already exist)
+CREATE INDEX IF NOT EXISTS idx_landcover_nlcd_2024_raster_rast ON landcover_nlcd_2024_raster USING GIST (ST_ConvexHull(rast));
+CREATE INDEX IF NOT EXISTS idx_slope_raster_rast ON slope_raster USING GIST (ST_ConvexHull(rast));
+CREATE INDEX IF NOT EXISTS idx_population_raster_rast ON population_raster USING GIST (ST_ConvexHull(rast));
 
--- Seed: nutrient requirement categories (coarse defaults; refine per-rotation/soil test)
-INSERT INTO crop_nutrient_requirements (
-  crop_id,
-  n_low_kg_ha,
-  n_high_kg_ha,
-  p2o5_low_kg_ha,
-  p2o5_high_kg_ha,
-  k2o_low_kg_ha,
-  k2o_high_kg_ha,
-  other_nutrients,
-  notes
-)
-SELECT c.id,
-       v.n_low_kg_ha,
-       v.n_high_kg_ha,
-       v.p2o5_low_kg_ha,
-       v.p2o5_high_kg_ha,
-       v.k2o_low_kg_ha,
-       v.k2o_high_kg_ha,
-       v.other_nutrients,
-       v.notes
-FROM crops c
-JOIN (
-  VALUES
-    -- Values are typical Michigan recommendation ranges in kg/ha as N, P2O5, K2O.
-    ('corn_grain', 100, 240, 45, 90, 40, 90, NULL::jsonb, NULL),
-    ('soybeans', 0, 0, 50, 60, 45, 75, NULL::jsonb, 'Nitrogen often supplied via fixation; exact rates depend on soil test and yield goal'),
-    ('wheat', 35, 100, 30, 65, 20, 35, NULL::jsonb, NULL),
-    ('dry_beans', 45, 55, 20, 30, 25, 45, NULL::jsonb, NULL),
-    ('sugar_beets', 50, 90, 25, 45, 75, 120, NULL::jsonb, NULL),
-    ('potatoes', 100, 200, 30, 70, 100, 200, NULL::jsonb, NULL),
-    ('tart_cherries', 30, 50, 20, 60, 50, 150, NULL::jsonb, NULL),
-    ('apples', 30, 65, 20, 80, 50, 150, NULL::jsonb, NULL),
-    ('blueberries', 25, 75, 40, 110, 50, 150, '{"pH":"acidic_preferred"}'::jsonb, NULL),
-    ('grapes', 20, 60, 30, 80, 60, 150, NULL::jsonb, NULL),
-    ('cucumbers', 50, 120, 15, 40, 60, 120, NULL::jsonb, NULL),
-    ('tomatoes', 100, 200, 50, 100, 100, 200, NULL::jsonb, NULL),
-    ('asparagus', 80, 200, 45, 90, 45, 90, NULL::jsonb, NULL),
-    ('carrots', 50, 120, 15, 80, 90, 400, NULL::jsonb, NULL),
-    ('onions', 50, 100, 135, 170, 335, 400, NULL::jsonb, NULL),
-    ('alfalfa_hay', 0, 20, 45, 175, 120, 320, NULL::jsonb, 'Legume N credit often reduces N needs; P/K removal can be high')
-) AS v(crop, n_low_kg_ha, n_high_kg_ha, p2o5_low_kg_ha, p2o5_high_kg_ha, k2o_low_kg_ha, k2o_high_kg_ha, other_nutrients, notes)
-  ON v.crop = c.crop
-ON CONFLICT (crop_id) DO NOTHING;
+-- Insert sample farm data (skip if already exists)
+INSERT INTO farms (user_id, name, boundary) VALUES
+('demo', 'Small Solar Farm (150 acres)', ST_GeomFromText('POLYGON((-82.8 42.2, -82.8 42.25, -82.75 42.25, -82.75 42.2, -82.8 42.2))', 4326)),
+('demo', 'Medium Solar Farm (300 acres)', ST_GeomFromText('POLYGON((-82.85 42.15, -82.85 42.22, -82.78 42.22, -82.78 42.15, -82.85 42.15))', 4326)),
+('demo', 'Large Solar Farm (500 acres)', ST_GeomFromText('POLYGON((-82.9 42.1, -82.9 42.2, -82.75 42.2, -82.75 42.1, -82.9 42.1))', 4326))
+ON CONFLICT DO NOTHING;

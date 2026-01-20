@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { loadFarms as loadFarmsFromStorage, saveFarms as saveFarmsToStorage } from './src/utils/farmStorage';
 import { loadLocation } from './src/utils/locationStorage';
 import { buildApiUrl } from './src/config/apiConfig';
@@ -131,46 +132,49 @@ export default function App() {
   // if (SHOW_TEST) return <TestPathRendering />;
 
   return (
-    <View style={{ flex: 1 }}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-      {currentScreen === 'home' && (
-        <HomeScreen 
-          onNavigateToCity={handleNavigateToCity}
-          savedLocation={savedLocation}
-          isLoadingInitial={isLoadingSavedLocation || isLoadingFarms}
-          onResumeSavedLocation={handleResumeSavedLocation}
-        />
-      )}
-      {currentScreen === 'citySelection' && selectedCounty && (
-        <CitySelectionScreen 
-          county={selectedCounty}
-          mcdData={mcdData}
-          isLoadingMcdData={isLoadingMcdData}
-          onNavigateBack={handleBackToHome}
-          onNavigateToPin={(city) => handleNavigateToPin(selectedCounty, city)}
-        />
-      )}
-      {currentScreen === 'map' && selectedCounty && selectedCity && (
-        <MapScreen
-          county={selectedCounty}
-          city={selectedCity}
-          mcdData={mcdData}
-          isLoadingMcdData={isLoadingMcdData}
-          initialFarms={farms}
-          onNavigateBack={handleBackToCitySelection}
-          onNavigateNext={handleNavigateToFarmDescription}
-          onFarmsUpdate={updateFarms}
-        />
-      )}
-      {currentScreen === 'farmDescription' && selectedCounty && selectedCity && (
-        <FarmDescriptionScreen
-          farms={farms}
-          county={selectedCounty}
-          city={selectedCity}
-          onNavigateBack={handleBackToMap}
-          onNavigateNext={handleNavigateToNextForm}
-        />
-      )}
-    </View>
+    <SafeAreaProvider>
+      <View style={{ flex: 1 }}>
+        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+        {currentScreen === 'home' && (
+          <HomeScreen 
+            onNavigateToCity={handleNavigateToCity}
+            savedLocation={savedLocation}
+            isLoadingInitial={isLoadingSavedLocation || isLoadingFarms}
+            onResumeSavedLocation={handleResumeSavedLocation}
+          />
+        )}
+        {currentScreen === 'citySelection' && selectedCounty && (
+          <CitySelectionScreen 
+            county={selectedCounty}
+            mcdData={mcdData}
+            isLoadingMcdData={isLoadingMcdData}
+            onNavigateBack={handleBackToHome}
+            onNavigateToPin={(city) => handleNavigateToPin(selectedCounty, city)}
+          />
+        )}
+        {currentScreen === 'map' && selectedCounty && selectedCity && (
+          <MapScreen
+            county={selectedCounty}
+            city={selectedCity}
+            mcdData={mcdData}
+            isLoadingMcdData={isLoadingMcdData}
+            initialFarms={farms}
+            onNavigateBack={handleBackToCitySelection}
+            onNavigateNext={handleNavigateToFarmDescription}
+            onFarmsUpdate={updateFarms}
+          />
+        )}
+        {currentScreen === 'farmDescription' && selectedCounty && selectedCity && (
+          <FarmDescriptionScreen
+            farms={farms}
+            county={selectedCounty}
+            city={selectedCity}
+            onNavigateBack={handleBackToMap}
+            onNavigateNext={handleNavigateToNextForm}
+            onFarmsUpdate={updateFarms}
+          />
+        )}
+      </View>
+    </SafeAreaProvider>
   );
 }

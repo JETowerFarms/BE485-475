@@ -88,11 +88,14 @@ backups/
 *.dump
 *.geojson.gz
 *.zip
-Datasets/
-backups/
-*.dump
-*.geojson.gz
-*.zip
+*.tif
+*.tif.aux.xml
+*.sql
+*.gz
+*.geojson
+Power_Plants_*.geojson.gz
+recovery/
+notes/*.pdf
 
 # Temporary files
 temp_michigan.geojson

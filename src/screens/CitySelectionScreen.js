@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   TextInput,
   Modal,
@@ -15,6 +14,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, G } from 'react-native-svg';
 import { buildApiUrl } from '../config/apiConfig';
 import { saveLocation } from '../utils/locationStorage';
@@ -34,10 +34,11 @@ const COLORS = {
   shadow: 'rgba(0,0,0,0.15)',
 };
 
-// Four-color palette for map coloring (muted, professional tones)
+// Five-color palette for map coloring (muted, professional tones)
 const MAP_COLORS = [
   '#E8D4B8', // Warm beige
   '#C5D5C5', // Sage green  
+  '#D4BCBC', // Muted rose
   '#D4C4B0', // Tan
   '#B8C8D8', // Light blue-gray
 ];
@@ -67,7 +68,7 @@ const calculatePolygonArea = (polygon) => {
 };
 
 // Check if two GeoJSON geometries are adjacent (share boundary points)
-const geometriesAdjacent = (geom1, geom2, tolerance = 0.001) => {
+const geometriesAdjacent = (geom1, geom2, tolerance = 0.01) => {
   // Extract all rings from both geometries (only outer rings for adjacency)
   const getRings = (geom) => {
     if (!geom) return [];
@@ -110,55 +111,114 @@ const geometriesAdjacent = (geom1, geom2, tolerance = 0.001) => {
 
 // Build adjacency list from GeoJSON features and assign colors
 const assignCityColorsFromGeoJSON = (features) => {
-  const colorMap = {};
+  const colorMap = {}; // Maps geoid to color index
+  const nameToGeoidMap = {}; // Maps display name to geoid
   const adjacency = {};
-  const names = [];
-  
-  // Build list of city names and initialize adjacency (use namelsad for uniqueness)
+  const geoids = [];
+
+  // Categorize features by type
+  const cities = [];
+  const villages = [];
+  const townships = [];
+
   features.forEach(f => {
-    const name = f.properties.namelsad || f.properties.name;
-    names.push(name);
-    adjacency[name] = [];
+    const geoid = f.properties.geoid;
+    const displayName = f.properties.namelsad || f.properties.name;
+    const lsad = f.properties.lsad; // Legal/Statistical Area Description code
+
+    if (geoid) {
+      geoids.push(geoid);
+      adjacency[geoid] = [];
+
+      // Map display name to geoid (last one wins if there are duplicates)
+      nameToGeoidMap[displayName] = geoid;
+
+      // Categorize by LSAD code
+      if (lsad === '25') {
+        cities.push(geoid);
+      } else if (lsad === '43') {
+        villages.push(geoid);
+      } else if (lsad === '44' || lsad === '45' || displayName.toLowerCase().includes('charter')) {
+        townships.push(geoid);
+      }
+    }
   });
-  
+
+  console.log(`Coloring: ${cities.length} cities, ${villages.length} villages, ${townships.length} townships`);
+
   // Build adjacency list by checking all pairs
   for (let i = 0; i < features.length; i++) {
     for (let j = i + 1; j < features.length; j++) {
-      const name1 = features[i].properties.namelsad || features[i].properties.name;
-      const name2 = features[j].properties.namelsad || features[j].properties.name;
-      
-      if (geometriesAdjacent(features[i].geometry, features[j].geometry)) {
-        adjacency[name1].push(name2);
-        adjacency[name2].push(name1);
+      const geoid1 = features[i].properties.geoid;
+      const geoid2 = features[j].properties.geoid;
+
+      if (geoid1 && geoid2 && geometriesAdjacent(features[i].geometry, features[j].geometry)) {
+        adjacency[geoid1].push(geoid2);
+        adjacency[geoid2].push(geoid1);
       }
     }
   }
-  
-  // Sort cities by number of neighbors (most constrained first - Welsh-Powell algorithm)
-  const sortedNames = [...names].sort((a, b) => adjacency[b].length - adjacency[a].length);
-  
-  // Greedy coloring with sorted order
-  for (const name of sortedNames) {
-    const usedColors = new Set();
-    for (const neighbor of adjacency[name]) {
-      if (colorMap[neighbor] !== undefined) {
-        usedColors.add(colorMap[neighbor]);
+
+  // Assign colors by category with different base colors
+  const assignColorsByCategory = (categoryGeoids, baseColorOffset) => {
+    // Sort by number of neighbors (most constrained first - Welsh-Powell algorithm)
+    const sortedGeoids = categoryGeoids.sort((a, b) => adjacency[b].length - adjacency[a].length);
+
+    // Greedy coloring with sorted order, but offset by base color
+    for (const geoid of sortedGeoids) {
+      const usedColors = new Set();
+      for (const neighbor of adjacency[geoid]) {
+        if (colorMap[neighbor] !== undefined) {
+          usedColors.add(colorMap[neighbor]);
+        }
+      }
+      // Assign first available color, cycling through the 4 colors
+      let assigned = false;
+      for (let c = 0; c < MAP_COLORS.length; c++) {
+        const colorIndex = (c + baseColorOffset) % MAP_COLORS.length;
+        if (!usedColors.has(colorIndex)) {
+          colorMap[geoid] = colorIndex;
+          assigned = true;
+          break;
+        }
+      }
+      // Fallback if all colors used
+      if (!assigned) {
+        colorMap[geoid] = baseColorOffset % MAP_COLORS.length;
       }
     }
-    // Assign first available color
-    for (let c = 0; c < MAP_COLORS.length; c++) {
-      if (!usedColors.has(c)) {
-        colorMap[name] = c;
-        break;
+  };
+
+  // Assign colors: cities start at 0, villages at 1, townships at 2
+  assignColorsByCategory(cities, 0);
+  assignColorsByCategory(villages, 1);
+  assignColorsByCategory(townships, 2);
+
+  // Validation: ensure no adjacent areas have the same color
+  const validateColoring = (adjacency, colorMap) => {
+    for (const geoid of geoids) {
+      const color = colorMap[geoid];
+      for (const neighbor of adjacency[geoid]) {
+        if (colorMap[neighbor] === color) {
+          console.warn(`Coloring validation failed: ${geoid} and ${neighbor} both have color ${color}`);
+          // Force different color for neighbor
+          const usedColors = new Set(adjacency[neighbor].map(n => colorMap[n]).filter(c => c !== undefined));
+          for (let c = 0; c < MAP_COLORS.length; c++) {
+            if (!usedColors.has(c) && c !== color) {
+              colorMap[neighbor] = c;
+              break;
+            }
+          }
+        }
       }
     }
-    // Fallback if all colors used (shouldn't happen with 4 colors on planar graph)
-    if (colorMap[name] === undefined) {
-      colorMap[name] = 0;
-    }
-  }
-  
-  return colorMap;
+  };
+
+  // Validate the coloring
+  validateColoring(adjacency, colorMap);
+
+  // Return both the geoid-based color map and the name-to-geoid mapping
+  return { colorMap, nameToGeoidMap };
 };
 
 const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: propIsLoading, onNavigateBack, onNavigateToPin }) => {
@@ -331,7 +391,8 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
   }, [countyMCDs, geoToSvg, bounds]);
 
   // Compute color assignments for cities (4-color theorem) using raw GeoJSON coordinates
-  const [cityColorMap, setCityColorMap] = useState({});
+  const [cityColorMap, setCityColorMap] = useState({}); // Maps geoid to color index
+  const [cityNameToGeoidMap, setCityNameToGeoidMap] = useState({}); // Maps display name to geoid
   const [isComputingColors, setIsComputingColors] = useState(false);
   
   useEffect(() => {
@@ -342,8 +403,9 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
     setIsComputingColors(true);
     // Use setTimeout to allow the loading indicator to render before heavy computation
     const timeoutId = setTimeout(() => {
-      const colors = assignCityColorsFromGeoJSON(countyMCDs);
-      setCityColorMap(colors);
+      const { colorMap, nameToGeoidMap } = assignCityColorsFromGeoJSON(countyMCDs);
+      setCityColorMap(colorMap);
+      setCityNameToGeoidMap(nameToGeoidMap);
       setIsComputingColors(false);
     }, 50);
     
@@ -726,7 +788,7 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
                 ]}
               >
                 <View style={styles.shadowContainer}>
-                  <Svg width={MAP_WIDTH} height={MAP_HEIGHT} viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}>
+                  <Svg width={MAP_WIDTH} height={MAP_HEIGHT} viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} pointerEvents="none">
                     <G transform="translate(5, 5)">
                       {countyMCDs.map((feature, index) => {
                         const pathData = geometryToPath(feature.geometry);
@@ -747,13 +809,15 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
                   height={MAP_HEIGHT}
                   viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
                   style={styles.mainMap}
+                  pointerEvents="none"
                 >
                   {countyMCDs.map((feature, index) => {
                     const cityName = feature.properties.namelsad || feature.properties.name;
+                    const geoid = feature.properties.geoid;
                     const isSelected = selectedCity === cityName;
                     const pathData = geometryToPath(feature.geometry);
                     if (!pathData) return null;
-                    const colorIndex = cityColorMap[cityName] ?? 0;
+                    const colorIndex = cityColorMap[geoid] ?? 0;
                     const fillColor = isSelected ? COLORS.selectedFill : MAP_COLORS[colorIndex];
                     return (
                       <Path
@@ -833,8 +897,8 @@ const styles = StyleSheet.create({
   },
   backArrowButton: {
     position: 'absolute',
-    top: 50,
-    left: 15,
+    top: 70,
+    left: 20,
     zIndex: 100,
     width: 36,
     height: 36,

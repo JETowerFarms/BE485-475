@@ -3,23 +3,13 @@ FROM postgis/postgis:14-3.3
 # Add tooling needed to import GIS datasets (vectors + raster)
 # - gdal-bin provides ogr2ogr/ogrinfo/gdalinfo
 # - unzip is used to read/extract dataset zips
-# - postgis scripts package provides raster2pgsql
+# Note: PostGIS is already included in the base image
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     gdal-bin \
     unzip \
-    postgis \
-    postgresql-14-postgis-3-scripts \
   && rm -rf /var/lib/apt/lists/*
 
-COPY import_vector_zip.sh /usr/local/bin/import_vector_zip
-RUN chmod +x /usr/local/bin/import_vector_zip
-
-COPY import_nlcd_raster.sh /usr/local/bin/import_nlcd_raster
-RUN chmod +x /usr/local/bin/import_nlcd_raster
-
-COPY import_landfire_slope_raster.sh /usr/local/bin/import_landfire_slope_raster
-RUN chmod +x /usr/local/bin/import_landfire_slope_raster
-
-COPY import_gpw_population_density_raster.sh /usr/local/bin/import_gpw_population_density_raster
-RUN chmod +x /usr/local/bin/import_gpw_population_density_raster
+# Copy the data import script and make it executable
+COPY import_data.sh /docker-entrypoint-initdb.d/05-import-data.sh
+RUN chmod +x /docker-entrypoint-initdb.d/05-import-data.sh

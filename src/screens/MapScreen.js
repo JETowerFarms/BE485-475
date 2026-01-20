@@ -1,9 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   Pressable,
   Platform,
@@ -15,6 +14,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import CrossPlatformMap from '../components/CrossPlatformMap';
 import { buildApiUrl } from '../config/apiConfig';
 
@@ -235,14 +235,41 @@ const orderPinIndexesForPolygon = (pins) => {
 const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propIsLoading, initialFarms, onNavigateBack, onNavigateNext, onFarmsUpdate }) => {
   const [pins, setPins] = useState([]);
   const [farmPins, setFarmPins] = useState(() => {
-    // Initialize farmPins from initialFarms if provided
+    // Initialize farmPins from initialFarms if provided, but only for valid farms
     if (initialFarms && initialFarms.length > 0) {
-      return initialFarms.flatMap(farm => farm.pins || []);
+      const validFarms = initialFarms.filter(farm => {
+        const id = parseInt(farm.id);
+        return !isNaN(id) && id < 1000000;
+      });
+      return validFarms.flatMap(farm => farm.pins || []);
     }
     return [];
   });
-  const [farms, setFarms] = useState(initialFarms || []);
+  const [farms, setFarms] = useState(() => {
+    // Filter out farms with invalid IDs (timestamp IDs that were never saved to backend)
+    if (initialFarms && initialFarms.length > 0) {
+      const validFarms = initialFarms.filter(farm => {
+        const id = parseInt(farm.id);
+        // Valid database IDs are small integers (< 1 million), timestamp IDs are large (> 1 billion)
+        return !isNaN(id) && id < 1000000;
+      });
+      return validFarms;
+    }
+    return [];
+  });
   const [backPressed, setBackPressed] = useState(false);
+  const farmsRef = useRef(farms);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    farmsRef.current = farms;
+  }, [farms]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   
   // Use prop data directly
   const mcdData = propMcdData;
@@ -264,6 +291,14 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
     message: '',
     onConfirm: () => {},
   });
+  
+  // Error modal state
+  const [errorModalVisible, setErrorModalVisible] = useState(false);
+  const [errorModalConfig, setErrorModalConfig] = useState({
+    title: '',
+    message: '',
+  });
+  
   const [isBuildingFarm, setIsBuildingFarm] = useState(false);
 
   // Find the selected city data and calculate centroid
@@ -294,10 +329,73 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
 
   // Notify parent component when farms change
   useEffect(() => {
-    if (onFarmsUpdate && farms.length > 0) {
+    if (onFarmsUpdate) {
       onFarmsUpdate(farms);
     }
   }, [farms, onFarmsUpdate]);
+
+  // Load farms from backend on component mount
+  useEffect(() => {
+    const loadFarmsFromBackend = async () => {
+      try {
+        const response = await fetch(buildApiUrl('/farms?userId=default-user'));
+        if (response.ok) {
+          const backendResponse = await response.json();
+          if (backendResponse.success && Array.isArray(backendResponse.data)) {
+            const localFarms = backendResponse.data.map(bf => {
+              if (!bf.id || !bf.name || !bf.boundary || !bf.boundary.coordinates) {
+                console.error('Invalid farm data from backend:', bf);
+                return null;
+              }
+              const existingFarm = (farmsRef.current || []).find(f => f?.id === bf.id.toString());
+              return {
+                id: bf.id.toString(),
+                type: 'Feature',
+                properties: {
+                  name: bf.name,
+                  county: county,
+                  city: city,
+                  createdAt: bf.createdAt,
+                  pinCount: bf.boundary.coordinates[0].length,
+                  avgSuitability: parseFloat(bf.avgSuitability) || 0,
+                },
+                geometry: bf.boundary,
+                pins: existingFarm?.pins || [],
+                backendAnalysis: existingFarm?.backendAnalysis || null,
+                analysisStatus: existingFarm?.analysisStatus,
+              };
+            }).filter(f => f !== null);
+            setFarms(localFarms);
+            
+            // Create farm pins from loaded farm boundaries
+            const loadedFarmPins = localFarms.flatMap(farm => {
+              if (farm.geometry && farm.geometry.coordinates && farm.geometry.coordinates[0]) {
+                return farm.geometry.coordinates[0].map((coord, index) => ({
+                  id: `${farm.id}-pin-${index}`,
+                  latitude: coord[1], // GeoJSON is [lng, lat]
+                  longitude: coord[0],
+                  color: '#3B82F6',
+                  farmId: farm.id,
+                  title: `Farm ${farm.properties.name} Pin ${index + 1}`,
+                }));
+              }
+              return [];
+            });
+            setFarmPins(loadedFarmPins);
+            
+            console.log('Loaded', localFarms.length, 'farms from backend');
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to load farms from backend:', error);
+        // Clear farms if backend load fails - don't show potentially stale/invalid local data
+        setFarms([]);
+        setFarmPins([]);
+      }
+    };
+
+    loadFarmsFromBackend();
+  }, []); // Empty dependency array - only run once on mount
 
   const handlePinAdd = (newPin) => {
     setPins(currentPins => [...currentPins, {
@@ -318,6 +416,11 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
   const showConfirmation = (title, message, onConfirm) => {
     setConfirmModalConfig({ title, message, onConfirm });
     setConfirmModalVisible(true);
+  };
+  
+  const showError = (title, message) => {
+    setErrorModalConfig({ title, message });
+    setErrorModalVisible(true);
   };
 
   const handleClearPins = () => {
@@ -344,99 +447,184 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
       const coordinates = orderedPins.map((pin) => [pin.longitude, pin.latitude]);
       // Close the polygon by adding the first point at the end
       coordinates.push(coordinates[0]);
-      
-      const farmId = Date.now().toString();
-      
-      // Fetch analysis data from backend - REQUIRED for all farms
-      let backendAnalysis = null;
+
+      // Create farm on backend first (returns farm ID immediately)
       try {
-        const response = await fetch(buildApiUrl('/farms/analyze'), {
+        const requestBody = {
+          userId: 'default-user',
+          name: `Farm ${farms.length + 1}`,
+          coordinates: coordinates.slice(0, -1),
+        };
+        
+        const farmResponse = await fetch(buildApiUrl('/farms'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ farmId, coordinates, county, city })
+          body: JSON.stringify(requestBody)
         });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Backend API error (${response.status}): ${errorText}`);
-        }
-        
-        backendAnalysis = await response.json();
-        
-        // Import SOLAR_DATA_CACHE from FarmDescriptionScreen
-        const { SOLAR_DATA_CACHE } = require('../screens/FarmDescriptionScreen');
-        
-        // Pre-populate SOLAR_DATA_CACHE with backend results
-        if (backendAnalysis.solarDataPoints) {
-          backendAnalysis.solarDataPoints.forEach(point => {
-            const cacheKey = `${point.lat.toFixed(6)}_${point.lng.toFixed(6)}`;
-            SOLAR_DATA_CACHE.set(cacheKey, {
-              overall: point.overall,
-              land_cover: point.land_cover,
-              slope: point.slope,
-              transmission: point.transmission,
-              population: point.population,
-              score: point.overall,
-              substation: point.transmission
-            });
-          });
+
+        if (!farmResponse.ok) {
+          const errorText = await farmResponse.text();
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch (e) {
+            // If not JSON, use raw text
+            errorData = { message: errorText };
+          }
+
+          // Handle farm size validation error specifically
+          if (farmResponse.status === 422 && errorData.error === 'Farm Too Large') {
+            showError(
+              'Farm Too Large',
+              errorData.message
+            );
+            return; // Don't create farm locally if backend rejected it
+          }
+
+          // For any other backend error, don't create farm locally
+          console.warn('Failed to save farm to backend:', errorText);
+          showError(
+            'Failed to Save Farm',
+            'Farm could not be saved to the server. Please check your connection and try again.'
+          );
+          return; // Don't create farm locally if backend save failed
+        } else {
+          const savedFarm = await farmResponse.json();
+          console.log('Farm saved to backend:', savedFarm);
           
-          console.log(`Backend analysis complete: ${backendAnalysis.dataPointCount} points in ${backendAnalysis.processingTimeMs}ms`);
-          console.log(`Avg suitability: ${backendAnalysis.metadata.avgSuitability}`);
-          console.log(`Solar grid: ${backendAnalysis.solarHeatMapGrid.width}x${backendAnalysis.solarHeatMapGrid.height}, ${backendAnalysis.solarHeatMapGrid.cells.length} cells`);
-          console.log(`Elevation grid: ${backendAnalysis.elevationHeatMapGrid.width}x${backendAnalysis.elevationHeatMapGrid.height}, ${backendAnalysis.elevationHeatMapGrid.cells.length} cells`);
+          if (!savedFarm.success || !savedFarm.data || !savedFarm.data.id) {
+            throw new Error('Invalid backend response structure');
+          }
+          
+          // Build farm object from backend response
+          const bluePins = orderedPins.map((pin) => ({
+            ...pin,
+            color: '#3B82F6',
+            farmId: savedFarm.data.id.toString(),
+          }));
+          
+          const farm = {
+            id: savedFarm.data.id.toString(),
+            type: 'Feature',
+            properties: {
+              name: savedFarm.data.name,
+              county: county,
+              city: city,
+              createdAt: savedFarm.data.createdAt,
+              pinCount: orderedPins.length,
+              avgSuitability: savedFarm.data.avgSuitability,
+            },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [coordinates],
+            },
+            pins: bluePins,
+            backendAnalysis: null,
+            analysisStatus: 'queued',
+          };
+
+          setFarmPins(currentFarmPins => [...currentFarmPins, ...bluePins]);
+          setFarms(currentFarms => [...currentFarms, farm]);
+          setPins([]);
+          console.log('Farm created:', farm.id, farm.properties.name);
+
+          const updateFarmAnalysisStatus = (farmId, status) => {
+            setFarms(currentFarms => currentFarms.map(f => {
+              if (f.id !== farmId) return f;
+              return { ...f, analysisStatus: status };
+            }));
+          };
+
+          // Kick off analysis by farm ID (non-blocking)
+          const analyzeFarmInBackground = async (farmToAnalyze) => {
+            const farmId = farmToAnalyze?.id;
+            if (!farmId) return;
+            const analysisCounty = farmToAnalyze?.properties?.county;
+            const analysisCity = farmToAnalyze?.properties?.city;
+            if (!analysisCounty || !analysisCity || analysisCounty.trim() === '' || analysisCity.trim() === '') {
+              console.warn('Analysis skipped: county or city not available for farm', farmId);
+              updateFarmAnalysisStatus(farmId, 'error');
+              return;
+            }
+            console.log('Starting background analysis for farm', farmId);
+            updateFarmAnalysisStatus(farmId, 'running');
+            try {
+              const rawCoordinates = farmToAnalyze?.geometry?.coordinates?.[0] || [];
+              const coordinates = rawCoordinates.length > 1 &&
+                rawCoordinates[0][0] === rawCoordinates[rawCoordinates.length - 1][0] &&
+                rawCoordinates[0][1] === rawCoordinates[rawCoordinates.length - 1][1]
+                ? rawCoordinates.slice(0, -1)
+                : rawCoordinates;
+
+              if (!Array.isArray(coordinates) || coordinates.length < 3) {
+                throw new Error('Invalid farm geometry: not enough points to analyze');
+              }
+
+              const payload = { coordinates };
+              console.log('Analyze request payload:', JSON.stringify(payload, null, 2));
+
+              const response = await fetch(buildApiUrl('/reports/analyze'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Backend API error (${response.status}): ${errorText}`);
+              }
+
+              const responseText = await response.text();
+              console.log('Analyze response payload:', responseText);
+              let backendAnalysis;
+              try {
+                backendAnalysis = JSON.parse(responseText);
+              } catch (parseError) {
+                throw new Error(`Invalid JSON response: ${parseError.message}`);
+              }
+
+              const solarResults = backendAnalysis?.solarSuitability?.results;
+              if (Array.isArray(solarResults) && solarResults.length > 0) {
+                // Solar data caching removed - no longer needed for heatmap display
+              }
+
+              const nextFarms = (farmsRef.current || []).map(f => {
+                if (f.id !== farmId) return f;
+                return {
+                  ...f,
+                  properties: {
+                    ...f.properties,
+                    avgSuitability: backendAnalysis?.solarSuitability?.summary?.averageSuitability,
+                  },
+                  backendAnalysis,
+                  analysisStatus: 'completed',
+                };
+              });
+              farmsRef.current = nextFarms;
+              if (isMountedRef.current) {
+                setFarms(nextFarms);
+              }
+              if (onFarmsUpdate) {
+                onFarmsUpdate(nextFarms);
+              }
+              console.log('Analysis completed for farm', farmId);
+            } catch (error) {
+              console.warn('Backend analysis failed:', error?.message || error);
+              console.log('Analysis failed for farm', farmId, error?.message || error);
+              updateFarmAnalysisStatus(farmId, 'error');
+            }
+          };
+
+          analyzeFarmInBackground(farm);
         }
       } catch (error) {
-        console.error('Backend API call failed:', error);
-        Alert.alert(
-          'Cannot Build Farm',
-          `Failed to analyze farm data from backend server.\n\nError: ${error.message}\n\nPlease ensure the backend server is running on port 3001.`,
-          [{ text: 'OK' }]
+        console.warn('Error saving farm to backend:', error);
+        showError(
+          'Network Error',
+          'Failed to connect to server. Please check your connection and try again.'
         );
-        return; // Don't create farm without backend data
+        return; // Don't create farm locally if network error
       }
-      
-      // Validate backend data structure
-      if (!backendAnalysis?.solarHeatMapGrid || !backendAnalysis?.elevationHeatMapGrid) {
-        console.error('Invalid backend response:', backendAnalysis);
-        Alert.alert(
-          'Invalid Backend Data',
-          'The backend returned incomplete data. Missing heat map grids.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-      
-      // Convert current pins to blue farm pins
-      const bluePins = orderedPins.map((pin) => ({
-        ...pin,
-        color: '#3B82F6', // Blue color for farm pins
-        farmId: farmId,
-      }));
-      
-      const farm = {
-        id: farmId,
-        type: 'Feature',
-        properties: {
-          name: `Farm ${farms.length + 1}`,
-          county: county,
-          city: city,
-          createdAt: new Date().toISOString(),
-          pinCount: orderedPins.length,
-          avgSuitability: backendAnalysis.metadata.avgSuitability, // Required from backend
-        },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [coordinates],
-        },
-        pins: bluePins, // Store the pins with the farm
-        backendAnalysis, // Store complete backend analysis (validated above)
-      };
-      
-      setFarmPins(currentFarmPins => [...currentFarmPins, ...bluePins]);
-      setFarms(currentFarms => [...currentFarms, farm]);
-      setPins([]); // Clear current pins for next farm
-      console.log('Farm polygon created:', JSON.stringify(farm, null, 2));
     } finally {
       setIsBuildingFarm(false);
     }
@@ -457,16 +645,42 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
   };
 
   // Delete a farm with confirmation
-  const handleDeleteFarm = (farmId) => {
+  const handleDeleteFarm = async (farmId) => {
     const farm = farms.find(f => f.id === farmId);
     const farmName = farm ? farm.properties.name : 'this farm';
-    
+
     showConfirmation(
       'Delete Farm',
       `Are you sure you want to delete "${farmName}"? This cannot be undone.`,
-      () => {
-        setFarms(currentFarms => currentFarms.filter(f => f.id !== farmId));
-        setFarmPins(currentFarmPins => currentFarmPins.filter(p => p.farmId !== farmId));
+      async () => {
+        try {
+          // Delete from backend first
+          const response = await fetch(buildApiUrl(`/farms/${farmId}?userId=default-user`), {
+            method: 'DELETE',
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.warn('Failed to delete farm from backend:', errorText);
+            showError(
+              'Delete Failed',
+              'Failed to delete farm from server. Please try again.'
+            );
+            return;
+          }
+
+          // If backend deletion successful, update local state
+          setFarms(currentFarms => currentFarms.filter(f => f.id !== farmId));
+          setFarmPins(currentFarmPins => currentFarmPins.filter(p => p.farmId !== farmId));
+
+          console.log('Farm deleted successfully from backend and local state');
+        } catch (error) {
+          console.warn('Error deleting farm from backend:', error);
+          showError(
+            'Delete Failed',
+            'Network error while deleting farm. Please check your connection and try again.'
+          );
+        }
       }
     );
   };
@@ -699,9 +913,9 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
         {isBuildingFarm && (
           <View style={styles.buildingOverlay}>
             <ActivityIndicator size="large" color="#FFFFFF" />
-            <Text style={styles.buildingOverlayText}>Building farm...</Text>
+            <Text style={styles.buildingOverlayText}>Creating farm...</Text>
             <Text style={styles.buildingOverlaySubtext}>
-              Crunching solar, elevation, and landcover layers.
+              Waiting for farm ID from the server.
             </Text>
           </View>
         )}
@@ -1006,6 +1220,31 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
           </View>
         </View>
       </Modal>
+      
+      {/* Error Modal */}
+      <Modal
+        visible={errorModalVisible}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+        onRequestClose={() => setErrorModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.errorModal}>
+            <Text style={styles.errorTitle}>{errorModalConfig.title}</Text>
+            <Text style={styles.errorMessage}>{errorModalConfig.message}</Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.errorButton,
+                pressed && styles.errorButtonPressed,
+              ]}
+              onPress={() => setErrorModalVisible(false)}
+            >
+              <Text style={styles.errorButtonText}>OK</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 };
@@ -1017,8 +1256,8 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: 'absolute',
-    top: 50,
-    left: 15,
+    top: 70,
+    left: 20,
     zIndex: 100,
     width: 36,
     height: 36,
@@ -1585,6 +1824,61 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 2 }],
   },
   confirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  // Error Modal Styles
+  errorModal: {
+    width: '80%',
+    backgroundColor: COLORS.background,
+    borderRadius: 8,
+    borderWidth: 3,
+    borderColor: '#C54B4B',
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 12,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000000',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#000000',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  errorButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 4,
+    borderWidth: 2,
+    backgroundColor: '#3B82F6',
+    borderColor: '#2563EB',
+    alignSelf: 'center',
+    minWidth: 100,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 2, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    elevation: 6,
+  },
+  errorButtonPressed: {
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    elevation: 0,
+    transform: [{ translateY: 2 }],
+  },
+  errorButtonText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 'bold',

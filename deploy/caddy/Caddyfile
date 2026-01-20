@@ -1,0 +1,17 @@
+# Michigan Solar Optimization API Gateway
+:80
+
+# API proxy
+handle /api/* {
+    reverse_proxy api:3000
+}
+
+# Health check
+handle /health {
+    respond "API Gateway Active" 200
+}
+
+# Default response
+handle {
+    respond "Michigan Solar Optimization API Gateway" 200
+}

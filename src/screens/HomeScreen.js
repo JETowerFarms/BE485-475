@@ -4,13 +4,13 @@ import {
   Text, 
   StyleSheet, 
   Pressable, 
-  SafeAreaView,
   StatusBar,
   BackHandler,
   ActivityIndicator,
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MichiganMap from '../components/MichiganMap';
 
 // Color scheme matching the reference design
@@ -228,8 +228,8 @@ const styles = StyleSheet.create({
   },
   exitButton: {
     position: 'absolute',
-    top: 50,
-    left: 15,
+    top: 70,
+    left: 20,
     zIndex: 100,
     width: 36,
     height: 36,

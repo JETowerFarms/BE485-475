@@ -59,10 +59,12 @@ configurations.all {
 dependencies {
     implementation("com.facebook.react:react-android")
 
-    implementation project(":@react-native-async-storage_async-storage")
-    implementation project(":@react-native-community_slider")
     implementation project(":react-native-gesture-handler")
+    implementation project(":react-native-async-storage_async-storage")
+    implementation project(":react-native-mmkv")
+    implementation project(":react-native-nitro-modules")
     implementation project(":react-native-reanimated")
+    implementation project(":react-native-safe-area-context")
     implementation project(":react-native-svg")
     implementation project(":react-native-webview")
     implementation project(":react-native-worklets")
@@ -72,4 +74,27 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+// Skip external native clean if codegen JNI directories are missing.
+def nodeModulesDir = rootProject.projectDir.parentFile.toPath().resolve("node_modules").toFile()
+def codegenJniDirs = [
+    "@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni",
+        "react-native-gesture-handler/android/build/generated/source/codegen/jni",
+        "react-native-nitro-modules/android/build/generated/source/codegen/jni",
+        "react-native-reanimated/android/build/generated/source/codegen/jni",
+        "react-native-webview/android/build/generated/source/codegen/jni",
+        "react-native-worklets/android/build/generated/source/codegen/jni",
+        "react-native-safe-area-context/android/build/generated/source/codegen/jni",
+        "react-native-svg/android/build/generated/source/codegen/jni",
+]
+def hasAllCodegenJni = {
+    codegenJniDirs.every { relativePath ->
+        def dir = new File(nodeModulesDir, relativePath)
+        return dir.exists() && new File(dir, "CMakeLists.txt").exists()
+    }
+}
+
+tasks.matching { it.name.startsWith("externalNativeBuildClean") }.configureEach {
+    onlyIf { hasAllCodegenJni() }
 }
