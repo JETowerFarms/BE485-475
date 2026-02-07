@@ -1,0 +1,220 @@
+Developer Network
+APIs & Documentation » Solar » PVWatts » PVWatts V8
+
+PVWatts V8 (GET /api/pvwatts/v8)
+
+PVWatts Version 8 is is the current version of the PVWatts API. Updates from Version 6 include a bifacial module option, a new input for monthly irradiance losses, new inputs for specifying albedo, and updates to the photovoltaic module, inverter, and thermal effects models to use more detailed and industry-accepted algorithms. PVWatts V8 also updates the weather data to 2020 TMY data from the NLR National Solar Radiation Database (NSRDB) for locations covered by the database. The NSRDB weather data used in PVWatts V6 is from around 2015. This update provides production estimates based on the latest, state-of-the art models from NLR that may differ from the V6 estimates, depending on the location and inputs. From a coding perspective, PVWatts V8 replaces the pvwattsv5 compute module with pvwattsv8 so that the PVWatts Calculator, web API, and implementation of PVWatts in the System Advisor Model (SAM) all use the same underlying model. For a complete description of PVWatts V8, see the description on the PVWatts website.
+
+NLR anticipates that the V8 API will run slightly slower than the V6 API due to upgraded models. Please contact [pvwatts@nrel.gov](mailto:pvwatts@nrel.gov) if you find V8 is significantly slower or that the performance is impacting your product.
+
+There is a forthcoming report containing a technical description of the model.
+
+Request URL
+GET /api/pvwatts/v8.format?parameters
+
+Request Parameters
+
+format
+Required: Yes
+Type: string
+Options: json, xml
+The output response format.
+
+api_key
+Required: Yes
+Type: string
+Your developer API key.
+
+system_capacity
+Required: Yes
+Type: decimal
+Range: 0.05 to 500000
+Nameplate capacity (kW).
+
+module_type
+Required: Yes
+Type: integer
+Options:
+0 Standard
+1 Premium
+2 Thin film
+
+losses
+Required: Yes
+Type: decimal
+Range: -5 to 99
+System losses (percent).
+
+array_type
+Required: Yes
+Type: integer
+Options:
+0 Fixed – Open Rack
+1 Fixed – Roof Mounted
+2 1-Axis
+3 1-Axis Backtracking
+4 2-Axis
+
+tilt
+Required: Yes
+Type: decimal
+Range: 0 to 90
+Tilt angle (degrees).
+
+azimuth
+Required: Yes
+Type: decimal
+Range: 0 to <360
+Azimuth angle (degrees).
+
+lat
+Required: Depends
+Type: decimal
+Range: -90 to 90
+Latitude for the location to use. Required if file_id not specified.
+
+lon
+Required: Depends
+Type: decimal
+Range: -180 to 180
+Longitude for the location to use. Required if file_id not specified.
+
+file_id
+Required: Depends
+Type: string
+Reference to a specific climate data file to use. Required if lat/lon not specified.
+
+dataset
+Required: No
+Type: string
+Options: nsrdb, tmy2, tmy3, intl
+The climate dataset to use.
+
+nsrdb: Gridded TMY data from the NLR National Solar Radiation Database.
+tmy2: TMY2 station data (1961–1990).
+tmy3: TMY3 station data (1991–2005).
+intl: PVWatts International station data.
+
+radius
+Required: No
+Type: integer
+Default: 100
+Search radius for closest climate data station (miles).
+
+timeframe
+Required: No
+Type: string
+Options: monthly, hourly
+Granularity of the output response.
+
+dc_ac_ratio
+Required: No
+Type: decimal
+Default: 1.2
+DC to AC ratio.
+
+gcr
+Required: No
+Type: decimal
+Default: 0.4
+Ground coverage ratio.
+
+inv_eff
+Required: No
+Type: decimal
+Default: 96
+Range: 90 to 99.5
+Inverter efficiency at rated power.
+
+bifaciality
+Required: No
+Type: decimal
+Range: 0 to 1
+Ratio of rear-side efficiency to front-side efficiency.
+
+albedo
+Required: No
+Type: decimal or array of decimal
+Range: >0 and <1
+Ground reflectance.
+
+use_wf_albedo
+Required: No
+Type: integer
+Options: 0, 1
+Use albedo values from the weather file if available.
+
+soiling
+Required: No
+Type: array of decimal
+Range: 0 to 100
+Monthly reduction in irradiance due to soiling.
+
+callback
+Required: No
+Type: string
+Return data using JSONP callback.
+
+Response Fields
+
+inputs
+errors
+warnings
+version
+ssc_info
+station_info
+outputs
+
+Station Info Fields
+
+lat
+lon
+elev
+tz
+location
+city
+state
+solar_resource_file
+distance
+weather_data_source
+
+Output Fields
+
+poa_monthly
+dc_monthly
+ac_monthly
+ac_annual
+solrad_monthly
+solrad_annual
+capacity_factor
+ac
+poa
+dn
+dc
+df
+tamb
+tcell
+wspd
+alb
+
+Examples
+
+JSON Output Format
+GET /api/pvwatts/v8.json?api_key=DEMO_KEY&azimuth=180&system_capacity=4&losses=14&array_type=1
+
+[JSON example output shown in document]
+
+XML Output Format
+GET /api/pvwatts/v8.xml?api_key=DEMO_KEY&azimuth=180&system_capacity=4&losses=14&array_type=1
+
+[XML example output shown in document]
+
+Rate Limits
+
+No more than 1,000 requests may be made in any hour.
+
+Errors
+
+422 Unprocessable Entity – One or more parameters did not pass validation or may be missing.
+
+The National Laboratory of the Rockies is a national laboratory of the U.S. Department of Energy, Office of Critical Minerals and Energy Innovation, operated under Contract No. DE-AC36-08GO28308. 
