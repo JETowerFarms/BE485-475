@@ -371,15 +371,22 @@ def optimize_land_allocation(
     A_ub.append([1.0] + [0.0] * len(crops))
     b_ub.append(max_solar)
 
-    # 5) A_s + sum A_cj ≤ crop_land (coupling constraint to prevent double-counting land)
+    # 5) A_s + sum A_cj ≤ crop_land (coupling — no double-counting land)
     A_ub.append([1.0] + [1.0] * len(crops))
     b_ub.append(crop_land)
+
+    # 6) -(A_s + sum A_cj) ≤ -crop_land  (all land is in use — farmer is already farming)
+    A_ub.append([-1.0] + [-1.0] * len(crops))
+    b_ub.append(-crop_land)
 
     A_ub = np.array(A_ub, dtype=float)
     b_ub = np.array(b_ub, dtype=float)
 
-    # Bounds for variables: (low, high)
-    x_bounds: List[Tuple[float, float]] = [(0, None)] + [(0, None)] * len(crops)
+    # Bounds for variables
+    # Solar is only available when the developer can pay a positive lease;
+    # otherwise no solar deal occurs and all land stays in crops.
+    solar_upper = None if pv_lease_per_acre > 0 else 0.0
+    x_bounds: List[Tuple[float, float]] = [(0, solar_upper)] + [(0, None)] * len(crops)
 
     # Solve LP
     res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=x_bounds, method="highs")
@@ -389,7 +396,9 @@ def optimize_land_allocation(
 
     A_s_opt = float(res.x[0])
     A_c_opts = [float(v) for v in res.x[1:]]
-    objective_value = -res.fun  # convert back to maximised objective
+    objective_value = pv_lease_per_acre * A_s_opt + sum(
+        pv_crop_per_acre[i] * A_c_opts[i] for i in range(len(crops))
+    )
 
     solar_pv_revenue, solar_pv_cost, solar_pv_no_lease = compute_solar_pv_no_lease(solar, econ)
     solar_pv_after_lease = solar_pv_no_lease - pv_lease_per_acre
@@ -408,7 +417,14 @@ def optimize_land_allocation(
     return result
 
 
-def main(acres: float, crop_names: str, pvwatts_response_path: Optional[str] = None, pvwatts_data: Optional[Dict[str, Any]] = None, output_json: bool = False):
+def main(
+    acres: float,
+    crop_names: str,
+    pvwatts_response_path: Optional[str] = None,
+    pvwatts_data: Optional[Dict[str, Any]] = None,
+    output_json: bool = False,
+    crop_data: Optional[List[Dict[str, Any]]] = None,
+):
     """
     Run the agrivoltaics optimization model for the specified crops.
 
@@ -613,24 +629,50 @@ def main(acres: float, crop_names: str, pvwatts_response_path: Optional[str] = N
         ),
     ]
 
-    # Select the specified crops
-    crop_dict = {c.name: c for c in all_crops}
-    selected_crops = []
-    invalid_crops = []
+    selected_crops: List[CropParameters] = []
 
-    for crop_name in crop_name_list:
-        if crop_name in crop_dict:
-            selected_crops.append(crop_dict[crop_name])
-        else:
-            invalid_crops.append(crop_name)
+    if crop_data:
+        # Build crops directly from provided data (no gating on name)
+        for idx, entry in enumerate(crop_data):
+            try:
+                name = entry.get('name') or entry.get('crop')
+                if not name:
+                    raise ValueError("missing name")
+                selected_crops.append(
+                    CropParameters(
+                        name=str(name),
+                        yield_per_acre=float(entry['yield_per_acre']),
+                        price_per_unit_0=float(entry['price_per_unit_0']),
+                        unit=str(entry.get('unit') or ''),
+                        cost_per_acre=float(entry['cost_per_acre']),
+                        escalation_rate=float(entry.get('escalation_rate') or 0.0),
+                    )
+                )
+            except KeyError as exc:
+                raise ValueError(f"Crop entry {idx} missing required field: {exc}") from exc
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Crop entry {idx} has invalid numeric field: {exc}") from exc
+        if not selected_crops:
+            raise ValueError("No crop data provided")
+        print(f"[Python] Using {len(selected_crops)} crop(s) from provided data: {[c.name for c in selected_crops]}")
+    else:
+        # Select the specified crops from the predefined set; reject unknowns
+        crop_dict = {c.name: c for c in all_crops}
+        invalid_crops = []
 
-    if invalid_crops:
-        raise ValueError(f"Unknown crops: {', '.join(invalid_crops)}. Available crops: {', '.join(crop_dict.keys())}")
+        for crop_name in crop_name_list:
+            if crop_name in crop_dict:
+                selected_crops.append(crop_dict[crop_name])
+            else:
+                invalid_crops.append(crop_name)
 
-    if not selected_crops:
-        raise ValueError("No valid crops specified")
+        if invalid_crops:
+            raise ValueError(f"Unknown crops: {', '.join(invalid_crops)}. Available crops: {', '.join(crop_dict.keys())}")
 
-    print(f"[Python] Selected {len(selected_crops)} crop(s) for analysis: {[c.name for c in selected_crops]}")
+        if not selected_crops:
+            raise ValueError("No valid crops specified")
+
+        print(f"[Python] Selected {len(selected_crops)} crop(s) for analysis: {[c.name for c in selected_crops]}")
 
     results = {}
 
@@ -748,78 +790,48 @@ def main(acres: float, crop_names: str, pvwatts_response_path: Optional[str] = N
         import json
         print(json.dumps(results))
 
+    return results
+
 
 if __name__ == "__main__":
     import sys
-    import os
+    import argparse
+    import json
 
-    print("[Python] === AGRIVOLTAICS MODEL STARTED ===")
-    print(f"[Python] Execution timestamp: {__import__('datetime').datetime.now().isoformat()}")
-    print(f"[Python] Python version: {sys.version}")
-    print(f"[Python] Command line arguments: {sys.argv}")
-
-    # Default to using the test response file
-    default_response_path = os.path.join(os.path.dirname(__file__), '..', '..', 'Research', 'pvwatts_test_response.json')
-
-    if len(sys.argv) > 1:
-        # Use provided file path
-        response_path = sys.argv[1]
-        print(f"[Python] Using provided response path: {response_path}")
-    else:
-        # Use default test file
-        response_path = default_response_path
-        print(f"[Python] Using default response path: {response_path}")
-
-    # Parse acres from second argument, required
-    if len(sys.argv) < 3:
-        print("[Python] ERROR: Acres and crop names are required")
-        print("Usage: python agrivoltaics_model.py [path_to_pvwatts_response.json] [acres] [crop_names] [--data json_string]")
-        print("  crop_names: Comma-separated list of crop names (e.g., 'Corn (grain),Soybeans,Wheat')")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Run agrivoltaics optimizer with PVWatts data")
+    parser.add_argument('--acres', type=float, required=True, help='Total acres available')
+    parser.add_argument('--crops', type=str, help='Comma-separated crop names')
+    parser.add_argument('--crop-data', dest='crop_data', type=str, help='JSON array of crop parameter objects')
+    parser.add_argument('--data', type=str, required=True, help='PVWatts JSON payload (string)')
+    parser.add_argument('--json', action='store_true', help='Output JSON only')
+    args = parser.parse_args()
 
     try:
-        acres = float(sys.argv[2])
-        print(f"[Python] Parsed acres: {acres} (type: {type(acres).__name__})")
-    except ValueError:
-        print(f"[Python] ERROR: Invalid acres value: {sys.argv[2]}")
-        print("Usage: python agrivoltaics_model.py [path_to_pvwatts_response.json] [acres] [crop_names] [--data json_string]")
-        print("  crop_names: Comma-separated list of crop names (e.g., 'Corn (grain),Soybeans,Wheat')")
+        pvwatts_data = json.loads(args.data)
+    except json.JSONDecodeError as exc:
+        print(f"[Python] ERROR: Invalid PVWatts JSON: {exc}")
         sys.exit(1)
 
-    crop_names = sys.argv[3]
-    print(f"[Python] Using crops: '{crop_names}'")
+    crop_data_json = None
+    if args.crop_data:
+        try:
+            crop_data_json = json.loads(args.crop_data)
+        except json.JSONDecodeError as exc:
+            print(f"[Python] ERROR: Invalid crop_data JSON: {exc}")
+            sys.exit(1)
 
-    output_json = False
-    if len(sys.argv) > 3 and sys.argv[3] == '--json':
-        output_json = True
-        print("[Python] Output format: JSON")
-
-    pvwatts_data = None
-    response_path = None
-    if len(sys.argv) > 4 and sys.argv[4] == '--data':
-        import json
-        pvwatts_data = json.loads(sys.argv[5])
-        print(f"[Python] Using inline PVWatts data ({len(sys.argv[5])} chars)")
-    else:
-        # Use provided path or default
-        if len(sys.argv) > 1 and sys.argv[1]:
-            response_path = sys.argv[1]
-        else:
-            response_path = default_response_path
-        print(f"[Python] Using PVWatts response file: {response_path}")
-
-    if not response_path and not pvwatts_data:
-        print("[Python] ERROR: Either PVWatts response path or --data must be provided")
-        print("Usage: python agrivoltaics_model.py [path_to_pvwatts_response.json] [acres] [crop_names] [--data json_string]")
-        print("  crop_names: Comma-separated list of crop names (e.g., 'Corn (grain),Soybeans,Wheat')")
+    if not args.crops and not crop_data_json:
+        print("[Python] ERROR: Provide at least --crops or --crop-data")
         sys.exit(1)
 
-    if response_path and not os.path.exists(response_path):
-        print(f"[Python] ERROR: PVWatts response file not found: {response_path}")
-        print("Usage: python agrivoltaics_model.py [path_to_pvwatts_response.json] [acres] [crop_names] [--data json_string]")
-        print("  crop_names: Comma-separated list of crop names (e.g., 'Corn (grain),Soybeans,Wheat')")
-        sys.exit(1)
+    result = main(
+        acres=args.acres,
+        crop_names=args.crops or '',
+        pvwatts_response_path=None,
+        pvwatts_data=pvwatts_data,
+        output_json=args.json,
+        crop_data=crop_data_json,
+    )
 
-    print(f"[Python] Calling main function with acres={acres}, crop_names={crop_names}, output_json={output_json}")
-    main(acres=acres, crop_names=crop_names, pvwatts_response_path=response_path, pvwatts_data=pvwatts_data, output_json=output_json)
-    print("[Python] === AGRIVOLTAICS MODEL COMPLETED SUCCESSFULLY ===")
+    if args.json:
+        print(json.dumps(result))

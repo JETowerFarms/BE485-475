@@ -14,6 +14,9 @@ const { queryElevationDataForPoints } = require('../utils/elevationDataGrabber')
 const { setTotalPoints: setElevationTotalPoints, getResults: getElevationResults } = require('../utils/elevationHeatMapParser');
 const { queryClearingCostDataForPoints, getExpectedValues, getAllPricingSnapshots } = require('../utils/clearingCostDataGrabber');
 
+// NREL PVWatts API Key
+const NREL_API_KEY = 'SP99xSHv1O1gGQjQFtXfJ2QuUzRILBOnPDo2HZTe';
+
 // Validation schema for analyze endpoint
 const analyzeFarmSchema = Joi.object({
   coordinates: Joi.array()
@@ -311,6 +314,9 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
     const medianSuitability = computeMedian(overallScores);
     const trimmedMeanSuitability = computeTrimmedMean(overallScores, 0.1);
     const insideMedianSuitability = computeMedian(insideScores);
+    const insideMeanSuitability = insideScores.length
+      ? insideScores.reduce((sum, value) => sum + value, 0) / insideScores.length
+      : 0;
 
     return {
       success: true,
@@ -325,12 +331,12 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
         gridPointCount: counts.gridPointCount ?? gridPoints.length,
         boundaryPointCount: counts.boundaryPointCount ?? coordinates.length,
         totalSamplePoints: coordinatePairs.length,
-        aggregationMethod: 'median',
+        aggregationMethod: 'mean',
         timestamp: new Date().toISOString()
       },
       summary: {
         ...parserResult.summary,
-        averageSuitability: Math.round(insideMedianSuitability * 100) / 100,
+        averageSuitability: Math.round(insideMeanSuitability * 100) / 100,
         medianSuitability: Math.round(medianSuitability * 100) / 100,
         trimmedMeanSuitability: Math.round(trimmedMeanSuitability * 100) / 100
       },
