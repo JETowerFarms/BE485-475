@@ -2,13 +2,22 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const FARMS_STORAGE_KEY = '@saved_farms';
 
+let storageInstance = null;
+
+export function getStorage() {
+  // Use AsyncStorage for more reliable persistence
+  return AsyncStorage;
+}
+
 /**
  * Load all saved farms from local storage
  * @returns {Promise<Array>} Array of farm objects
  */
 export const loadFarms = async () => {
+  const storage = getStorage();
+  if (!storage) return [];
   try {
-    const savedFarms = await AsyncStorage.getItem(FARMS_STORAGE_KEY);
+    const savedFarms = await storage.getItem(FARMS_STORAGE_KEY);
     if (savedFarms !== null) {
       const parsedFarms = JSON.parse(savedFarms);
       console.log(`Loaded ${parsedFarms.length} farms from storage`);
@@ -27,30 +36,11 @@ export const loadFarms = async () => {
  * @returns {Promise<boolean>} Success status
  */
 export const saveFarms = async (farmsData) => {
+  const storage = getStorage();
+  if (!storage) return false;
   try {
-    // Strip out heavy heat map grid data to avoid storage limits
-    // Heat maps will be regenerated from backend when viewing farm
-    const lightweightFarms = farmsData.map(farm => {
-      const { backendAnalysis, ...farmWithoutAnalysis } = farm;
-      
-      if (backendAnalysis) {
-        // Keep only metadata, remove heavy grid data
-        return {
-          ...farmWithoutAnalysis,
-          backendAnalysis: {
-            metadata: backendAnalysis.metadata,
-            dataPointCount: backendAnalysis.dataPointCount,
-            processingTimeMs: backendAnalysis.processingTimeMs,
-            // Omit solarHeatMapGrid and elevationHeatMapGrid - too large
-          }
-        };
-      }
-      
-      return farm;
-    });
-    
-    await AsyncStorage.setItem(FARMS_STORAGE_KEY, JSON.stringify(lightweightFarms));
-    console.log(`Saved ${lightweightFarms.length} farms to storage (without heat map grids)`);
+    await storage.setItem(FARMS_STORAGE_KEY, JSON.stringify(farmsData));
+    console.log(`Saved ${farmsData.length} farms to storage (with backend analysis)`);
     return true;
   } catch (error) {
     console.error('Error saving farms:', error);
@@ -63,8 +53,10 @@ export const saveFarms = async (farmsData) => {
  * @returns {Promise<boolean>} Success status
  */
 export const clearFarms = async () => {
+  const storage = getStorage();
+  if (!storage) return false;
   try {
-    await AsyncStorage.removeItem(FARMS_STORAGE_KEY);
+    await storage.removeItem(FARMS_STORAGE_KEY);
     console.log('Cleared all farms from storage');
     return true;
   } catch (error) {
@@ -78,8 +70,10 @@ export const clearFarms = async () => {
  * @returns {Promise<number>} Count of farms
  */
 export const getFarmCount = async () => {
+  const storage = getStorage();
+  if (!storage) return 0;
   try {
-    const savedFarms = await AsyncStorage.getItem(FARMS_STORAGE_KEY);
+    const savedFarms = await storage.getItem(FARMS_STORAGE_KEY);
     if (savedFarms !== null) {
       const parsedFarms = JSON.parse(savedFarms);
       return parsedFarms.length;

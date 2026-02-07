@@ -1,0 +1,259 @@
+1 Pre‑Planning: Site Selection, Regulations and Taxes
+1.1 Zoning and Right‑to‑Farm Protections
+Local zoning determines where farming is permitted. Michigan’s Zoning Enabling Act allows townships and counties to divide land into districts and restrict uses[1]. Agricultural activity is generally allowed in rural districts but may require a special permit in suburban jurisdictions[1]. Farmers should contact planning officials to verify that proposed uses align with the zoning designation. The Michigan Right to Farm Act (RTFA) protects farms that meet the definition of a commercial farm and follow Generally Accepted Agricultural and Management Practices (GAAMPs) from nuisance suits and conflicting ordinances[1]. GAAMPs cover manure management, site selection for livestock facilities, animal care, nutrient utilization, irrigation water use and pesticide utilization[1]. Farms that comply with GAAMPs enjoy immunity from many local restrictions[1].
+Per‑acre cost: Zoning and RTFA compliance involve administrative effort but no direct per‑acre cost. Because GAAMPs are freely available and compliance prevents future liability, the implied cost is minimal (<$1 per acre) and primarily involves time spent consulting regulators.
+1.2 Building Codes and Permits
+Michigan’s State Construction Code exempts structures that are “incidental to the use for agricultural purposes of the land on which the building is located” from its definition of a building[2]. Pole barns, freestall barns, hoop structures and other farm buildings used exclusively for production generally do not require state building permits. Local governments may still request an agricultural building exemption form and may regulate electrical and plumbing installations. Livestock facilities with large manure storage or high animal numbers may require permits under the National Pollutant Discharge Elimination System (NPDES) or the Michigan Department of Environment, Great Lakes and Energy. Farmers should check whether irrigation wells exceeding 70 gallons per minute need registration and whether wetlands or waterways require permits. Permit fees vary, but the administrative cost is small relative to other expenses.
+Per‑acre cost: Filing for agricultural building exemptions and state environmental permits typically costs $200–$500 per facility. Spreading this over a 100‑acre farm equals roughly $2–$5 per acre.
+1.3 Property Taxes and Farmland Preservation
+Michigan taxes farmland at fair market value instead of agricultural use value. A legislative analysis of farmland preservation programs noted that Michigan farmers pay $17–$20 per acre in property taxes compared with $7–$10 nationally[3]. Farmers can enroll in farmland preservation agreements (Public Act 116) to receive income‑tax credits for keeping land in agriculture[3]. Conservation easements through land trusts may also reduce taxes and prevent non‑agricultural development.
+Per‑acre cost: Property taxes average $18.50 per acre for Michigan farms[3]. Participation in preservation programs can offset this cost through tax credits but does not eliminate it.
+2 Land Acquisition and Financing
+2.1 Farmland Values and Rental Rates
+USDA’s National Agricultural Statistics Service reported that Michigan farm real estate (land and buildings) averaged $6,310 per acre in 2024[4]. Cropland averaged $5,870 per acre and pasture averaged $2,970 per acre[4]. Cash rent for cropland averaged $152 per acre[4]. These figures provide baseline purchase or lease values.
+Per‑acre cost: Purchasing cropland costs $6,310 per acre[4] while leasing costs roughly $152 per acre per year. Pasture costs $2,970 per acre[4].
+2.2 Financing and Transaction Costs
+Buying farmland usually requires a down payment of 20–30 %. Closing costs include legal fees, title insurance and appraisal services, often totaling $300–$1,000 per transaction. Interest rates for farm mortgages vary with market conditions; many producers use Farm Service Agency loans with reduced down payments. For budgeting, allocate 25 % of the purchase price as cash (for down payment and closing) and finance the remainder. Spreading closing costs across a 100‑acre purchase adds approximately $3–$10 per acre.
+Per‑acre cost: Assuming a $6,310 purchase price per acre, a 25 % down payment adds $1,577 per acre to the initial outlay. Transaction fees add $3–$10 per acre.
+3 Soil Evaluation and Land Preparation
+3.1 Soil Testing and Mapping
+Soil tests reveal nutrient levels, pH and organic matter. Michigan State University (MSU) Extension sells soil‑test bags for $18 per sample[5] and recommends one sample per 5–10 acres. A 100‑acre farm therefore requires roughly ten samples, costing $180. Surveyors can prepare a topographic map and legal description for $500–$1,500 per farm; dividing by 100 acres yields $5–$15 per acre. Farmland with wetlands or endangered species may need environmental assessments; costs vary but typically add $500–$2,000.
+Per‑acre cost: Soil testing and mapping cost around $2.0–$3.0 per acre (testing) plus $5–$15 per acre for surveying, totalling $7–$18 per acre.
+3.2 Site Clearing, Grading and Lane Construction
+Cornell Cooperative Extension’s building cost guide estimates that general site preparation costs $5 per square foot[6] and that stripping topsoil costs $3–$3.50 per cubic yard[6]. Clearing vegetation and grading are only necessary for areas hosting buildings, lanes and paddocks. Clearing 10 % of a 100‑acre farm (435,600 ft²) at $5/ft² costs $2.18 million, or $21,780 per acre. Clearing just 2 % of the land (87,120 ft²) costs $435,600, or $4,356 per acre. Constructing a 16‑ft‑wide gravel lane costs $7.50 per linear foot[6]. A half‑mile (2,640 ft) lane therefore costs $19,800, or $198 per acre.
+Per‑acre cost: Depending on how much land is cleared for infrastructure, site preparation ranges from $4,356 per acre (2 % clearing) to $21,780 per acre (10 % clearing). Lane construction adds $198 per acre.
+3.3 Soil Amendments and Lime
+After soil tests, farmers may need to apply lime to raise soil pH. Iowa State University budgets allocate $11.05 per acre per year for lime[7]. Fertility management costs appear later under annual maintenance. Minor soil amendments such as compost or gypsum vary widely and are not priced consistently.
+Per‑acre cost: Plan to spend $11 per acre annually on lime[7] during establishment.
+3.4 Subsurface Tile Drainage
+Many Michigan soils are poorly drained. Iowa State University’s “Understanding the Economics of Tile Drainage” provides a simple example: installing tile drainage at $500 per acre increases annual net returns by $100 per acre, yielding a payback period of five years[8]. In practice, tile systems in the Midwest cost $800–$1,400 per acre depending on tile spacing and outlet construction. Properly installed drainage improves yields and reduces compaction.
+Per‑acre cost: Installing tile drains costs $500–$1,400 per acre and requires occasional outlet maintenance. Using the $500 per acre example yields an annualized cost of $100 per acre (assuming a five‑year payback)[8].
+4 Water Supply and Irrigation
+4.1 Water Requirements and Permitting
+Field crops in Michigan require approximately 7 acre‑inches of irrigation water per year[9], or about 20 cm. Irrigation systems must deliver 5–7 gallons per minute per irrigated acre to meet evapotranspiration demand[9]. Wells that withdraw more than 70 gallons per minute must be registered, and surface‑water withdrawals may require permits. The cost of drilling a well depends on depth and geology; no Michigan‑specific extension sources provide numbers, so well costs are not included in per‑acre budgets.
+Per‑acre cost: Permitting and registration fees are modest (<$2 per acre) and are included in administrative overhead.
+4.2 Irrigation System Installation and Ownership Costs
+MSU Extension developed budgets for several irrigation systems using the DIRTI method (Depreciation, Interest, Repairs, Taxes and Insurance). Table 1 summarises installation and annual costs. Ownership costs include depreciation, interest, repairs, taxes and insurance; operating costs include energy and labor.
+System (irrigated acres)	Installation cost	Annual ownership cost per irrigated acre	Annual operating cost (energy + labor)	Total annual cost per irrigated acre	Source
+40‑acre center pivot	$38 000 for equipment; well and power $30 000[10]
+$237.98 per acre per year[10]
+$25.49 per acre[10]
+$263.47 per acre per year[10]
+MSU irrigation example
+80‑acre traveller	Traveller $19 000; piping $3 000; well and power $30 000[10]
+$75.08 per acre per year[10]
+$51.00 per acre[10]
+$126.08 per acre per year[10]
+MSU irrigation example
+160‑acre center pivot	$62 000 for machine; water and power $32 000[10]
+$93.26 per acre per year[10]
+$30.50 per acre[10]
+$123.76 per acre per year[10]
+MSU irrigation example
+For a 100‑acre farm with 40 irrigated acres, the 40‑acre pivot installation cost of $68 000 equates to $680 per farm acre. Annual ownership and labor costs of $263.47 per irrigated acre translate to $105.39 per farm acre (0.4 × $263.47). Farmers selecting traveller or larger pivots should adjust per‑acre costs accordingly.
+Per‑acre cost: Installing a 40‑acre center pivot costs $680 per acre on a 100‑acre farm. Annual ownership and labor costs add $105.39 per acre.
+4.3 Irrigation Energy and Herbicide Activation
+Delivering an acre‑inch of irrigation water costs roughly $7.19 per acre‑inch on average in Michigan[9]. Electric pumps cost $5.49 per acre‑inch and diesel pumps $8.90 per acre‑inch[9]. Applying the recommended 7 acre‑inches of water costs about $50 per acre (7 × $7.19). Irrigation also aids herbicide incorporation. An MSU article notes that poor rainfall may necessitate a second herbicide application costing $30–$40 per acre, plus $10–$12 for application[11]. Irrigating a half‑inch of water (costing $3.50 per acre) soon after herbicide application can activate herbicides and reduce the need for reapplication[11].
+Per‑acre cost: Irrigation energy costs about $50 per acre for 7 acre‑inches[9]. Adding a half‑inch of water for herbicide activation costs $3.50 per acre, which may save $30–$52 in additional herbicide and application costs[11].
+5 Fencing and Paddock Design
+5.1 Perimeter and Paddock Fencing
+MSU Extension’s Livestock Fencing Basics bulletin compares common fence types. A four‑rail board fence costs $9–$10 per foot; a five‑strand barbed‑wire fence costs $1.55–$2.25 per foot; woven wire costs $2.00–$4.50 per foot; high‑tensile electric (four‑wire) costs $0.95–$1.25 per foot; portable flex‑net electric costs $0.90–$1.15 per foot; and single‑strand poly wire costs $0.20 per foot[12]. Fence lifespan varies from 10 years for barbed wire to 20–30 years for high‑tensile electric[12]. Installing a four‑wire high‑tensile fence around a 40‑acre square paddock (perimeter ≈ 5,280 ft) costs $5,016–$6,600[12]. Per acre, this equates to $125–$165 for a 40‑acre paddock and about $58 per farm acre when averaged over 100 acres.
+Per‑acre cost: High‑tensile perimeter fencing costs $58–$165 per acre, depending on paddock size. Temporary internal fences using poly wire cost $0.20 per foot, allowing cross‑fencing for under $5 per acre.
+5.2 Fence Maintenance
+High‑tensile fences last 20–30 years with minimal maintenance[12]. Annualized maintenance, including occasional post replacement and energizer costs, can be estimated by dividing installation cost by 25 years; for the example paddock, annual maintenance is about $5.81 per acre.
+Per‑acre cost: Fence maintenance adds $6 per acre per year.
+6 Buildings and Infrastructure
+6.1 Machinery Sheds and Livestock Barns
+Cornell Cooperative Extension’s building cost guide lists costs for common agricultural structures. Post‑frame (pole) buildings cost $8.40–$14.40 per square foot[6]. A 40 × 60 ft machinery shed (2,400 ft²) therefore costs $20,160–$34,560, or $202–$346 per acre when spread across 100 acres. Hoop structures (fabric‑covered frames) cost $7.25 per square foot[6], making a 2,400 ft² hoop shed $17,400 (or $174 per acre). Conventional stud‑wall buildings cost $18 per square foot[6], raising the cost of a 2,400 ft² utility building to $43,200 (or $432 per acre). Freestall dairy barns are more expensive at $22–$26 per square foot[6], equating to $48,400–$57,200 for a 10,000 ft² barn and $484–$572 per acre on a 100‑acre farm.
+Per‑acre cost: Machinery storage ranges from $174–$432 per acre, depending on structure type. Adding a dairy barn increases infrastructure costs by an additional $484–$572 per acre.[6]
+6.2 High Tunnels and Greenhouses
+High tunnels (unheated hoop houses) extend the growing season for vegetables and small fruits. Kentucky State University’s high‑tunnel fact sheet states that high‑tunnel materials (excluding labor) cost $1.50–$5.00 per square foot[13], and a medium‑sized tunnel (30 × 96 ft or 2,880 ft²) costs $4,320–$14,400[13]. Drip irrigation for such tunnels costs $300–$1,000, and annual maintenance (replacing plastic and repairing irrigation) costs $100–$1,000[14]. High‑tunnel kits with metal hoops range from $2.25–$5.00 per square foot[15]. Oklahoma State University notes that high‑tunnel material costs can be as low as $0.50 per square foot, whereas greenhouses can cost up to $20 per square foot[16].
+To compute a per‑acre cost, multiply cost per square foot by 43,560 ft². High tunnels at $1.50–$5.00 per ft² therefore cost $65,340–$217,800 per acre, while inexpensive hoop houses at $0.50 per ft² cost $21,780 per acre. In practice, farmers typically cover only a small fraction of an acre; for example, a 2,880‑ft² high tunnel costing $4,320–$14,400 equates to $43–$144 per acre (spread over 100 acres).
+Per‑acre cost: A high tunnel covering 2,880 ft² costs $43–$144 per farm acre. Covering an entire acre with high tunnels would cost $21,780–$217,800 per acre depending on materials[13][15][16].
+6.3 Grain and Feed Storage
+On‑farm grain bins provide storage and marketing flexibility. Mississippi State University surveyed producers and found that constructing grain bins costs $4.00–$4.50 per bushel[17]. Example costs were $270,000 for a 60,000‑bushel bin, $340,000 for an 80,000‑bushel bin and $490,000 for a 120,000‑bushel bin[18]. When amortized over the life of the bin, costs equate to $0.42–$0.46 per bushel per year[18]. Ownership expenses (depreciation, taxes, insurance and repairs) range from 4–10 % of the establishment cost[19]. To store grain from a 100‑acre corn farm (170 bushels per acre, 17,000 bushels total), a 20,000‑bushel bin would suffice; using the $340,000 80,000‑bushel example as a guide (allowing for expansion), the cost per farm acre is about $3,400.
+Grain storage bags are a flexible alternative. University of Tennessee Extension notes that bags hold 10,000–18,000 bushels and cost 6–17 cents per bushel[20]. Storing 20,000 bushels would require two bags costing $1,200–$3,400 (or $12–$34 per acre). Bag loaders and unloaders add additional capital costs; producers should place bags on well‑drained sites and monitor for tears[20].
+Per‑acre cost: Constructing a grain bin capable of storing 17,000 bushels costs roughly $3,400 per acre when averaged over 100 acres. Using grain bags costs $12–$34 per acre but is temporary[17][20].
+6.4 Poultry Housing (Optional Enterprise)
+For producers considering broiler production, University of Maryland Extension provides a broiler enterprise budget for two tunnel‑ventilated houses measuring 60 × 550 ft (33,000 ft² total). The budget lists a tunnel house cost of $360,000 for two houses, equivalent to $5.45 per square foot[22]. Equipment costs $180,000 (or $2.73 per ft²) and site preparation $20,000 (or $0.30 per ft²)[23]. The total investment is $637,800[24]. If these houses occupy 6 acres, the investment amounts to roughly $106,300 per acre. Annual fixed costs (depreciation, interest, taxes and insurance) total $70,226, or $1.06 per ft²[25]; variable costs for electricity, repairs and cleaning add another $31,711 per flock[26]. Broiler production is often managed under contract with integrators and requires specialized equipment.
+Per‑acre cost: Building two broiler houses requires a capital investment of $106,300 per acre and annual fixed costs of roughly $10,000 per acre, assuming six acres devoted to the facility[22][24]. This enterprise is optional and may not suit all farms.
+7 Machinery and Equipment
+7.1 Tractors and Self‑Propelled Machinery
+MSU’s 2026 Custom Work Rates report lists purchase prices and ownership costs for tractors and combines. A 40 hp tractor costs $33,000[27] with ownership cost $6.13 per hour and fuel/lubrication $1.11 per hour[28]. A 75 hp tractor costs $65,000[29] and a 105 hp mid‑sized tractor costs $173,000 with ownership cost $16.10 per hour[29]. A 160 hp tractor costs $299,000 with ownership cost $24.53 per hour[29]. A 275 hp combine without a head costs $447,000 with ownership cost $42.16 per hour[29]. Farmers can purchase implements such as planters, drills and sprayers or hire custom operators. Custom rates include depreciation, fuel and labor and are discussed in the maintenance section.
+Per‑acre cost: Purchasing a 105‑hp tractor and a 40‑hp utility tractor for a 100‑acre farm costs $206,000, or $2,060 per acre. Buying a combine adds $4,470 per acre. Renting or custom hiring equipment can reduce capital outlay.
+7.2 Implements and Attachments
+Implements such as plows, field cultivators, planters, drills and sprayers range widely in price depending on width and configuration. Because academic sources rarely list purchase prices, this report assumes farmers use custom hire. For example, the MSU custom work summary lists chisel plowing at $19.81 per acre[30], row‑crop planting at $19.85 per acre[30], boom spraying at $9.62 per acre[30] and cultivating at $10.34 per acre[30]. These costs include equipment, labor, fuel and repairs.
+Per‑acre cost: Hiring custom operators for tillage, planting and spraying costs about $50 per acre (sum of typical operations), eliminating the need to purchase the implements. For farms that own implements, annual depreciation and repairs must be calculated separately.
+8 Enterprise‑Specific Establishment Costs
+8.1 Apple Orchards
+MSU Extension’s Michigan Apple Cost of Production 2025 budget differentiates high‑density and semidwarf orchards. Planting a high‑density orchard costs $26,578 per acre and total establishment (land preparation, trees, trellis, irrigation and deer fence) costs $41,344 per acre, which is amortized to $2,067 per acre per year over 20 years[31]. A semidwarf orchard costs $7,676 per acre to plant and $21,250 per acre to establish, amortized to $1,062 per acre per year[31]. Pre‑plant costs include clearing, subsoiling, lime and seeding, and per‑acre irrigation equipment costs about $700 for a well and $400 for a trickle system[32]. Deer fencing adds $500 per acre[32].
+Per‑acre cost: Establishing a high‑density apple orchard costs $41,344 per acre (amortized at $2,067 per year)[31]. A semidwarf orchard costs $21,250 per acre (amortized at $1,062 per year)[31].
+8.2 Blueberries
+The MSU Extension budget for blueberries indicates that establishing highbush blueberry fields cost $23,956 per acre, and total production costs in the first bearing year exceeded $10,000 per acre[33]. Establishment costs include land preparation, plants, drip irrigation, trellising, frost protection and labor during the non‑bearing years. Maintenance costs include pruning, fertilization, weed control, pest management and irrigation.
+Per‑acre cost: Establishing a blueberry planting costs $23,956 per acre[33]. Annual production expenses for mature blueberries are approximately $10,000 per acre[33].
+8.3 Peaches
+The 2024 MSU peach cost of production budget estimates establishment costs of $9,167 per acre for processing peaches and $10,107 per acre for fresh peaches[34]. Annual production costs are $5,355 per acre for processing peaches and $7,587 per acre for fresh peaches[34]. These costs cover planting, training, pruning, fertilization, pest control, irrigation and harvesting.
+Per‑acre cost: Establishing a peach orchard costs $9,167–$10,107 per acre[34]. Annual production costs range from $5,355–$7,587 per acre[34].
+8.4 Cabbage and Vegetables
+MSU Extension reports that producing fresh‑market cabbage costs nearly $7,700 per acre, whereas processing cabbage costs $4,140 per acre[35]. Harvesting accounts for more than half of the cost[35]. Costs for broccoli, carrots or lettuce would differ but are of similar magnitude.
+Per‑acre cost: Fresh market cabbage costs $7,700 per acre, and processing cabbage costs $4,140 per acre[35].
+8.5 Pasture Establishment
+Iowa State University’s pasture improvement guide shows that renovating a pasture with a legume–grass mixture costs $287.85 per acre in initial expenses and that grass seeding costs $273.25 per acre[36]. A simpler grass improvement costs $105.55 per acre[36]. Annual maintenance and amortized establishment costs total $182.33 per acre for the legume–grass mixture, $175.25 per acre for grass seeding and $96.88 per acre for grass improvement[37]. Costs include machinery operations, fertilizer, herbicide, seed and labor[38].
+Per‑acre cost: Establishing new pasture costs $105–$288 per acre, and annual maintenance ranges from $97–$182 per acre[36][37].
+9 Step‑by‑Step Example Budget for a 100‑Acre Farm
+To integrate the preceding cost components, Table 2 presents a start‑up budget for a 100‑acre mixed crop and livestock farm in Michigan. Two scenarios are offered: one with 10 % of land cleared for infrastructure and one with 2 % cleared. The farm includes land purchase, soil testing, surveying, clearing, lane construction, tile drainage, fencing a 40‑acre paddock, installing a 40‑acre center‑pivot irrigation system, building a 2,400‑ft² post‑frame machinery shed, purchasing a 105‑hp tractor and a 40‑hp tractor, and constructing grain storage and a small high tunnel. The high‑tunnel coverage is limited to one structure (2,880 ft²).
+Component	Assumptions	Total cost	Cost per acre (100 acres)
+Land purchase	100 acres × $6,310 per acre[4]
+$631,000	$6,310
+Down payment	25 % of purchase price	$157,750	$1,577
+Closing costs	$800 transaction fees	$800	$8
+Soil tests	10 samples × $18 each[5]
+$180	$1.80
+Survey & mapping	$1,000 survey	$1,000	$10
+Site clearing & grading	10 % of land at $5/ft²[6]
+$2,178,000	$21,780
+Lane construction	0.5‑mile lane at $7.50/ft[6]
+$19,800	$198
+Tile drainage	$500 per acre[8]
+$50,000	$500
+Lime (year 1)	$11.05 per acre[7]
+$1,105	$11.05
+Fencing	40‑acre paddock, 4‑wire high‑tensile at $1.10/ft[12]
+$5,808	$58
+Irrigation system	40‑acre center pivot installation $68,000[10]
+$68,000	$680
+Irrigation ownership & labor	$263.47 per irrigated acre × 40%[10]
+$10,539	$105.39
+Machinery shed (post‑frame)	2,400 ft² × $10/ft²[6]
+$24,000	$240
+105‑hp tractor	Purchase price $173,000[29]
+$173,000	$1,730
+40‑hp tractor	Purchase price $33,000[29]
+$33,000	$330
+Grain bin	80,000‑bushel bin $340,000[18]
+$340,000	$3,400
+High tunnel (one 30 × 96 ft)	Cost $4,320–$14,400[13]
+$9,360 (midpoint)	$93.60
+Solar system	10‑kW array $30,000[21]
+$30,000	$300
+Pasture establishment	New pasture on 30 acres at $288/acre[36]
+$8,640	$86.40
+Total capital (10 % clearing)	Sum of all items	≈$3.51 million	≈$35,100 per acre
+Total capital (2 % clearing)	Replace clearing cost with $435,600	≈$1.97 million	≈$19,700 per acre
+Notes:
+Clearing cost dominates the start‑up budget. Reducing cleared area from 10 % to 2 % cuts capital cost by roughly $15,400 per acre. Most farms clear only around building sites, so the 2 % scenario is more realistic.
+Optional components such as dairy barns or broiler houses are excluded from this table because they significantly raise per‑acre capital requirements.
+10 Annual Operations and Maintenance Costs
+Annual costs include field operations, crop inputs, irrigation, equipment repairs, labor, insurance and taxes. Table 3 estimates maintenance costs for a partially irrigated row‑crop farm. Enterprise‑specific budgets for orchards, blueberries, peaches, cabbage and pasture follow.
+Category	Assumptions	Cost per acre	Source
+Tillage & planting	Chisel plow $19.81/acre[30]; row‑crop planter $19.85/acre[30]; row cultivator $10.34/acre[30]; boom spraying $9.62/acre[30]
+$59.62	MSU custom rates
+Herbicide products	Soil‑applied herbicides cost $50/acre[11]; additional application if no rain costs $30–$40 + $10–$12[11]; assume proper irrigation avoids reapplication	$50.00	MSU herbicide article
+Insecticide	Corn budgets allocate $20/acre for insecticide[39]; apply to corn acres
+$20.00	Iowa budgets
+Fertilizer	Nitrogen 172 lb at $0.60/lb (corn); phosphate 63 lb at $0.67/lb; potash 50 lb at $0.53/lb[40]; total $171.91/acre[40]
+$171.91	Iowa budgets
+Lime (annualized)	$11.05/acre[7]
+$11.05	Iowa budgets
+Irrigation energy	7 acre‑inches at $7.19/acre‑inch[9]
+$50.33	MSU energy analysis
+Irrigation ownership & labor	$105.39/acre (for 40 % irrigated area)[10]
+$105.39	MSU irrigation example
+Fence maintenance	Annualized cost of high‑tensile fence ≈ $5.81/acre	$5.81	Derived
+Equipment repairs	Repair cost estimated at 10 % of equipment value; for $206,000 in tractors, $20,600/yr → $206 per acre (estimation)	$206.00	Derived
+Labor	Routine chores 0.25 hr/acre/week at $22.49/hr[29] yields $292/acre
+$292.00	MSU labor rate
+Property taxes	$18.50/acre[3]
+$18.50	Michigan legislative analysis
+Insurance & crop insurance	Crop insurance $15.90–$18.90/acre[41]; general liability estimated $18/acre	$18.00	Iowa budgets
+Total (row‑crop maintenance)	Sum of above	≈$948 per acre	
+Per‑acre cost: Annual row‑crop maintenance on the example farm costs approximately $948 per acre. Fertilizer, labor, equipment repairs and irrigation are the largest components.
+10.1 Maintenance Costs for Orchards and Specialty Crops
+High‑density apple orchard: Annualized establishment cost $2,067 per acre[31] plus production expenses of $3,000–$5,000 (pest control, pruning, thinning, harvest). Total maintenance may exceed $5,000–$7,000 per acre.
+Semidwarf apple orchard: Annualized establishment cost $1,062 per acre[31]; maintenance typically $3,000–$5,000 per acre.
+Blueberries: After establishment, annual production costs average $10,000 per acre[33].
+Peaches: Annual production costs are $5,355–$7,587 per acre[34].
+Pasture maintenance: Annualized cost $97–$182 per acre[37].
+Cabbage: Production costs $7,700 per acre (fresh market) or $4,140 per acre (processing)[35].
+10 Conclusion
+Building a commercial farm in Michigan requires significant capital investments beyond the cost of land. Site preparation, drainage, irrigation, fencing, buildings, machinery, grain storage, high tunnels and renewable energy systems contribute to start‑up costs that can range from $19,700 to $35,100 per acre depending on how much land is cleared for infrastructure. Enterprise‑specific investments, such as apple orchards ($21,250–$41,344 per acre), blueberry fields ($23,956 per acre) and peach orchards ($9,167–$10,107 per acre), can further increase capital requirements. Annual maintenance costs for row‑crop production with partial irrigation are around $948 per acre, while specialty crops like blueberries may cost $10,000 per acre each year. Thorough planning, careful budgeting, adherence to GAAMPs and diversification of enterprises are essential for the profitability and sustainability of Michigan farms.
+11 References
+The following references correspond to the tether IDs used in the report. All sources are publicly accessible.
+Cornell Cooperative Extension. (2022). Building cost estimates – Ag facilities 2022 [PDF]. Dairy Challenge. https://www.dairychallenge.org/pdfs/student_resources/bldg-cost-est-2022.pdf[6].
+Iowa State University Extension. (2023). Understanding the economics of tile drainage (Ag Decision Maker File C2‑90). https://www.extension.iastate.edu/agdm/wholefarm/html/c2-90.html[8].
+Iowa State University Extension. (2024). Estimated costs of crop production in Iowa – 2024 (FM 1712). https://www.extension.iastate.edu/agdm/crops/pdf/a1-20-2024.pdf[40].
+Michigan Legislature. (2005). Farmland preservation: Ag districts (House Bill 4257 analysis). https://www.legislature.mi.gov/documents/2005-2006/billanalysis/House/htm/2005-HLA-4257-3.htm[3].
+Michigan Legislature. (2025). Michigan compiled laws § 125.1502a – State Construction Code Act. https://www.legislature.mi.gov/Laws/MCL[2].
+Mississippi State University Extension. (2024). Economic considerations of grain bin ownership. https://extension.msstate.edu/publications/economic-considerations-grain-bin-ownership[17].
+Michigan State University Extension. (2015). Hoophouse farming startup (Bulletin E3138). https://www.canr.msu.edu/resources/hoophouse_farming_startup_e3138.
+Michigan State University Extension. (2020). Bulletin E‑3422 – Introduction to zoning and taxation. https://www.canr.msu.edu/resources/bulletin-e-3422-introduction-to-zoning-and-taxation[1].
+Michigan State University Extension. (2024). Analyzing the costs of energy for irrigation in Michigan. https://www.canr.msu.edu/news/analyzing-the-costs-of-energy-for-irrigation-in-michigan[9].
+Michigan State University Extension. (2024). Farm real estate values and cash rents (News Release NR‑24‑46). U.S. Department of Agriculture National Agricultural Statistics Service. https://www.nass.usda.gov/Statistics_by_State/Michigan/Publications/Current_News_Release/2024/nr2446mi.pdf[4].
+Michigan State University Extension. (2024). Irrigation and herbicides: Benefits and challenges. https://www.canr.msu.edu/news/irrigation_to_improve_herbicide_performance[11].
+Michigan State University Extension. (2024). 2026 Michigan State University custom work rates report summary [PDF]. https://www.canr.msu.edu/farm_management/uploads/files/2026%20Custom%20Work%20Summary%20v2%20-%20FINAL.pdf[30].
+Michigan State University Extension. (2024). 2026 Michigan State University custom work rates report [PDF]. https://www.canr.msu.edu/farm_management/uploads/files/2026%20Custom%20Work%20Rates%20v2%20-%20FINAL.pdf[29].
+Michigan State University Extension. (2025). 40‑acre center pivot system example. https://www.canr.msu.edu/irrigation/Irrigation-Planning/Irrigation-Costs-Pages/40-acre-center-pivot-system[10].
+Michigan State University Extension. (2025). Traveller system example. https://www.canr.msu.edu/irrigation/Irrigation-Planning/Irrigation-Costs-Pages/traveler-system[10].
+Michigan State University Extension. (2025). 160‑acre center pivot example. https://www.canr.msu.edu/irrigation/Irrigation-Planning/Irrigation-Costs-Pages/160-acre-center-pivot[10].
+Michigan State University Extension. (2017). Livestock fencing basics (Bulletin). https://www.canr.msu.edu/uploads/236/92931/Fencing_systems_for_Livestock_Jerry_Lindquist_March_13_2017.pdf[12].
+Michigan State University Extension. (2017). Soil testing through MSU Extension. https://www.canr.msu.edu/news/soil-testing-returns-through-msu-extension[5].
+Michigan State University Extension. (2024). Considering solar energy? It can yield real cost savings on your farm. https://www.canr.msu.edu/news/considering-solar-energy-it-can-yield-real-cost-savings-on-your-farm[21].
+Michigan State University Extension. (2024). Michigan apple cost of production 2025 [PDF]. https://www.canr.msu.edu/uploads/resources/pdfs/michigan-apple-cost-of-production-2025.pdf[31].
+Michigan State University Extension. (2024). Michigan blueberry cost of production 2024 [PDF]. https://www.canr.msu.edu/uploads/resources/pdfs/michigan-blueberry-cost-of-production-2024.pdf[33].
+Michigan State University Extension. (2024). Michigan peach cost of production 2024 [PDF]. https://www.canr.msu.edu/uploads/resources/pdfs/michigan-peach-cost-of-production-2024.pdf[34].
+Michigan State University Extension. (2024). Michigan cabbage cost of production 2024 [PDF]. https://www.canr.msu.edu/uploads/resources/pdfs/michigan-cabbage-cost-of-production-2024.pdf[35].
+Iowa State University Extension. (2022). Estimated costs of pasture and hay production (Ag Decision Maker C2‑27). https://www.extension.iastate.edu/agdm/wholefarm/pdf/c2-27.pdf[36].
+University of Tennessee Extension. (2023). Estimating costs for grain storage: Bags and bins (Publication W1060). https://utia.tennessee.edu/publications/wp-content/uploads/sites/269/2023/10/W1060.pdf[20].
+University of Maryland Extension. (2021). Farm broiler production enterprise budget (two houses). https://extension.umd.edu/sites/extension.umd.edu/files/2021-02/POULTRY_RevisedBroilerEnterpriseBudget.pdf[22].
+University of Arkansas Extension. (2024). Cost of constructing a metal hoop high tunnel (FSA‑6147). https://www.uaex.uada.edu/publications/pdf/FSA-6147.pdf[15].
+Oklahoma State University Extension. (2017). High tunnels (HLA‑6720). https://extension.okstate.edu/fact-sheets/high-tunnels.html[16].
+[1] Bulletin E-3422 Introduction to Zoning and Taxation - Developing and Educating Managers and New Decision-makers (DEMaND)
+https://www.canr.msu.edu/resources/bulletin-e-3422-introduction-to-zoning-and-taxation
+[2] MCL - Section 125.1502a - Michigan Legislature
+https://www.legislature.mi.gov/Laws/MCL
+[3] [Title]
+https://www.legislature.mi.gov/documents/2005-2006/billanalysis/House/htm/2005-HLA-4257-3.htm
+[4] nr2446mi.pdf
+https://www.nass.usda.gov/Statistics_by_State/Michigan/Publications/Current_News_Release/2024/nr2446mi.pdf
+[5] Soil testing through MSU Extension - Soil Health
+https://www.canr.msu.edu/news/soil-testing-returns-through-msu-extension
+[6] bldg-cost-est-2022.pdf
+https://www.dairychallenge.org/pdfs/student_resources/bldg-cost-est-2022.pdf
+[7] [27] [28] [29] [39] [40] [41] 2024 Estimated Costs of Crop Production in Iowa
+https://www.extension.iastate.edu/agdm/crops/pdf/a1-20-2024.pdf
+[8] Understanding the Economics of Tile Drainage | Ag Decision Maker
+https://www.extension.iastate.edu/agdm/wholefarm/html/c2-90.html
+[9] Analyzing the costs of energy for irrigation in Michigan - Irrigation
+https://www.canr.msu.edu/news/analyzing-the-costs-of-energy-for-irrigation-in-michigan
+[10] 40 acre Center Pivot System - Irrigation
+https://www.canr.msu.edu/irrigation/Irrigation-Planning/Irrigation-Costs-Pages/40-acre-center-pivot-system
+[11] Irrigation and herbicides: Benefits and challenges - Irrigation
+https://www.canr.msu.edu/news/irrigation_to_improve_herbicide_performance
+[12] Livestock Fencing Basics
+https://www.canr.msu.edu/uploads/236/92931/Fencing_systems_for_Livestock_Jerry_Lindquist_March_13_2017.pdf
+[13] [14] High%20Tunnel%20Fact%20Sheet.pdf
+https://www.kysu.edu/documents/college-of-agriculture-communities-the-sciences/urban-ag/High%20Tunnel%20Fact%20Sheet.pdf
+[15] Cost of Constructing a Metal Hoop High Tunnel - FSA6147
+https://www.uaex.uada.edu/publications/pdf/FSA-6147.pdf
+[16] High Tunnels | Oklahoma State University 
+https://extension.okstate.edu/fact-sheets/high-tunnels.html
+[17] [18] [19] Economic Considerations of Grain Bin Ownership | Mississippi State University Extension Service
+https://extension.msstate.edu/publications/economic-considerations-grain-bin-ownership
+[20] W1060
+https://utia.tennessee.edu/publications/wp-content/uploads/sites/269/2023/10/W1060.pdf
+[21] Considering solar energy? It can yield real cost savings on your farm - Farm Management
+https://www.canr.msu.edu/news/considering-solar-energy-it-can-yield-real-cost-savings-on-your-farm
+[22] [23] [24] [25] [26] POULTRY_RevisedBroilerEnterpriseBudget.pdf
+https://extension.umd.edu/sites/extension.umd.edu/files/2021-02/POULTRY_RevisedBroilerEnterpriseBudget.pdf
+[30] 2026 Michigan State University Custom Work Rates.xlsm
+https://www.canr.msu.edu/farm_management/uploads/files/2026%20Custom%20Work%20Summary%20v2%20-%20FINAL.pdf
+[31] [32] Michigan Apple Cost of Production 2024
+https://www.canr.msu.edu/farm_management/uploads/files/E3533_MI_Apple_COP_AA.pdf
+[33] Michigan Blueberry Cost of Production 2024
+https://www.canr.msu.edu/farm_management/uploads/files/MI_Blueberry_Cost_Production_AA.pdf
+[34] Michigan Peach Cost of Production 2024
+https://www.canr.msu.edu/farm_management/uploads/files/Mi%20Peaches%20Cost%20of%20Production_AA.pdf
+[35] Michigan Cabbage Cost of Production 2024 - Vegetables
+https://www.canr.msu.edu/resources/michigan-cabbage-cost-of-production-2024
+[36] [37] [38] A1-15 AG-96.indd
+https://www.extension.iastate.edu/agdm/crops/pdf/a1-15.pdf

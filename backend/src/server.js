@@ -11,21 +11,24 @@ const { testConnection } = require('./database');
 dotenv.config();
 
 // Import routes
-const solarRoutes = require('./routes/solar');
-const farmRoutes = require('./routes/farms');
+const farmRoutes = require('./routes/farmHandler');
 const geoRoutes = require('./routes/geo');
 const cropRoutes = require('./routes/crops');
+const { router: reportRoutes } = require('./routes/reportsHandler');
 
 // Create Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy for correct IP detection behind reverse proxies
+app.set('trust proxy', process.env.TRUST_PROXY ? parseInt(process.env.TRUST_PROXY) : 1);
+
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration - restrict origins in production
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : false, // No default '*' - require explicit config
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
@@ -34,9 +37,10 @@ app.use(cors(corsOptions));
 // Compression middleware
 app.use(compression());
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing middleware - configurable limits
+const bodyLimit = process.env.BODY_LIMIT || '10mb';
+app.use(express.json({ limit: bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // Logging middleware
 if (process.env.NODE_ENV === 'development') {
@@ -45,7 +49,8 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Rate limiting
+// Rate limiting - global for /api/
+// TODO: Add stricter rate limits for sensitive endpoints (e.g., auth routes if added)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
@@ -63,10 +68,10 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/solar', solarRoutes);
 app.use('/api/farms', farmRoutes);
 app.use('/api/geo', geoRoutes);
 app.use('/api/crops', cropRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -74,10 +79,10 @@ app.get('/', (req, res) => {
     name: 'Michigan Solar Optimization API',
     version: '1.0.0',
     endpoints: {
-      solar: '/api/solar',
       farms: '/api/farms',
       geo: '/api/geo',
       crops: '/api/crops',
+      reports: '/api/reports',
       health: '/health',
     },
   });

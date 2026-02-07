@@ -24,7 +24,6 @@ backend/
 │       └── geo.js            # Geographic data endpoints
 ├── scripts/
 │   ├── setup-database.js     # Database initialization
-│   └── import-solar-data.js  # Import 30x30 grid data
 ├── DATABASE_SCHEMA.sql       # Complete database schema
 ├── package.json
 └── .env.example
@@ -134,60 +133,6 @@ npm start
 
 ## API Endpoints
 
-### Solar Data
-
-#### Get Point Data
-```http
-GET /api/solar/point/:lat/:lng
-```
-
-**Example:**
-```bash
-curl http://localhost:3000/api/solar/point/42.7325/-84.5555
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "lat": 42.7325,
-    "lng": -84.5555,
-    "overall": 67.5,
-    "land_cover": 75.2,
-    "slope": 89.3,
-    "transmission": 45.6,
-    "population": 60.1
-  }
-}
-```
-
-#### Get Bounding Box Data
-```http
-GET /api/solar/bbox?minLat=42.7&minLng=-84.6&maxLat=42.8&maxLng=-84.5&limit=1000
-```
-
-#### Get Polygon Data
-```http
-POST /api/solar/polygon
-Content-Type: application/json
-
-{
-  "coordinates": [
-    [-84.5555, 42.7325],
-    [-84.5445, 42.7325],
-    [-84.5445, 42.7235],
-    [-84.5555, 42.7235]
-  ],
-  "limit": 5000
-}
-```
-
-#### Get Statistics
-```http
-GET /api/solar/stats
-```
-
 ### Farm Management
 
 #### List User Farms
@@ -282,6 +227,15 @@ GET /api/geo/cities/:countyId
 **calculate_farm_suitability(boundary)** - Analyze farm area
 
 **get_solar_data_bbox(minLat, minLng, maxLat, maxLng)** - Query rectangle
+
+### Solar Suitability Regeneration
+
+1. **Load rasters/vectors** – Import NLCD 2024, LandFire 2020 slope, and GPW v4 population rasters into PostGIS tables `landcover_nlcd_2024_raster`, `landfire_slope_2020_raster`, and `gpw_population_density_2020_raster`. Load the provided MISubstations GeoJSON via `npm run solar:substations` (writes to `energy_substations`).
+2. **Install sampling functions** – `psql -d <db> -f backend/sql/solar_inputs.sql` adds scoring helpers plus `solar_sample_inputs(lat, lng)`.
+3. **Generate & insert (direct to DB)** – `npm run solar:chunks` streams grid points, samples real datasets via `solar_sample_inputs`, and inserts directly into `solar_suitability` in large batches.
+4. **Verify** – `SELECT COUNT(*) FROM solar_suitability;` and test farm analysis via `POST /api/farms/analyze` to confirm solar data is accessible.
+
+Environment overrides: `GRID_LAT_MIN`, `GRID_LAT_MAX`, `GRID_LNG_MIN`, `GRID_LNG_MAX`, `GRID_SPACING`.
 
 ## Performance
 

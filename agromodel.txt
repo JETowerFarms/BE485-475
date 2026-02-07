@@ -1,0 +1,2587 @@
+Updated Linear Optimization Model Outline (Michigan Agrivoltaics) – Full-Dev Only with Shared-Resource, Permitting, Interconnection, Agrivoltaic Geometry, Subsidy, Farmland-Preservation, and “Right Land” Constraints (Target 50% ITC)
+1. Input handling
+Land parameters: total available land ((A_{\text{tot}})); list of crop types ((j=1,\dots,J)) (each j represents a distinct crop); solar configuration choice ((\text{config}\in{\text{fixed},\text{tracker},\text{vertical},\dots})); land-use intensity ((\alpha_{\text{ac/MW}}(\text{config}))) = acres per MW_ac of solar. Typical values: fixed-tilt ≈5.5 acres/MW_ac, one-axis tracker ≈6.3 acres/MW_ac, two-axis ≈9.4 acres/MW_ac. (Assumption: \alpha_{\text{ac/MW}} reflects industry averages in Michigan; using these ensures capacity and land use are consistently linked.)
+Project schedule: project life ((T)) in years; construction timing with CAPEX streams ((\text{CAPEX}_t)) for expenditures in year t (e.g. multi-year build); repower option flag ((\text{repower}\in{0,1})) indicating if a mid-life repowering (instead of full removal at T) is considered. (Assume T ~25-30 years for solar; repower option default 0 unless specified.)
+Electricity price input (utility-scale revenue):
+Retail reference (for context only): ((P^{\text{elec,ret}}_0 \approx 0.19\ $/\text{kWh})) – a typical retail electricity rate, used as a benchmark but not for selling project power. (Assumption: This highlights that selling power via net-metering might fetch ~$0.19/kWh, but our model uses a wholesale rate below this.)
+Wholesale sell price: ((P^{\text{elec,sell}}0)) = initial power sale price (e.g. PPA price, $/kWh) for year 0; escalated by growth rate g{\text{elec}}: ((P^{\text{elec,sell}}_t = P^{\text{elec,sell}}0 (1+g{\text{elec}})^t)). (Assumption: P^{\text{elec,sell}}_0 is based on utility-scale solar PPA rates, significantly lower than retail – e.g. $0.05–$0.07/kWh.)
+Curtailment/export factors: ((\phi^{\text{curt}}_t \in [0,1])) = fraction of potential generation not curtailed (1 = no curtailment); ((\phi^{\text{export}}_t \in [0,1])) = fraction of generation that can be exported (1 = no grid export limit). These reduce effective sales. (Assumption: Values are provided or scenario-based; e.g. \phi^{\text{curt}} = 0.95 if 5% curtailment expected, \phi^{\text{export}} = 1 unless export caps apply.)
+Crop price inputs: ((P^{\text{crop}}{j,0})) = price for crop j at t=0 (in $/unit yield); crop-specific escalation ((g{\text{crop},j})) for prices. (Assumption: Based on USDA projections or inflation; e.g. 2% annual growth in crop prices.) For simplicity, yields and prices can be treated in aggregate revenue per acre terms if needed (but we keep them separate for fidelity).
+Economic parameters: discount rate ((r)) for NPV (real terms, unless otherwise specified); inflation rate ((\pi)) if working with nominal values. If using nominal cash flows, convert a given nominal discount (or interest) to real: e.g., ((r_{\text{real}} = \frac{1+r_{\text{nom}}}{1+\pi} - 1)). Optionally, include tax rate ((\tau)) if tax effects are modeled (here mostly relevant for ITC usage, depreciation, etc., which we simplify by treating ITC as a direct credit). Debt financing terms if any: loan interest rate ((i_d)), loan tenor in years ((N_d)), and debt fraction (portion of upfront capital financed by debt). (Assumption: Unless analyzing financing explicitly, we might take r as WACC or a target return, and consider the project on an all-equity basis for simplicity.)
+Land acquisition/lease costs:
+Land purchase cost: If the project buys the land, upfront cost: ((\text{CAPEX}^{\text{land}}0 = A{\text{tot}} \cdot 6310)) $/acre. Here $6,310/acre is assumed as the land value. (Assumption: $6.3k/acre is an approximate Michigan farmland market price; this is a one-time cost at t=0 if land is purchased outright.)
+Cropland rent baseline: ((\text{Lease}^{\text{crop}} \approx 152\ $/\text{acre-yr})) – the typical annual cash rent for farmland if used for crops (no solar). (Assumption: $152/acre-year based on regional average cropland rental rates; used as an opportunity cost benchmark for keeping land in farming.)
+Solar land-lease parameters (FULL-DEV model – developer leases land from owner):
+Lease rate (decision variable): ((L_{\text{solar}}\ [$/\text{acre-yr}])) = annual payment per acre to the landowner for land used by solar. This will be determined by the model.
+Lease rate bounds: ((L_{\min} = 500,; L_{\max} = 1200\ $/\text{acre-yr})) to reflect plausible lease offers. (Assumption: Utility-scale solar leases in MI range roughly $500–$1200/acre-year; we constrain L_{\text{solar}} within this range.)
+Lease payment stream: ((\text{LeasePay}t = A_s \cdot L{\text{solar}})) for each operational year t (t=1,...,T). This is the developer’s annual lease expense (and conversely the farmer’s lease income). If lease escalates with inflation or a fixed rate, we could include that (e.g., L_{\text{solar}}(t) = L_{\text{solar}} (1+g_{\text{lease}})^{t}), but for simplicity we assume a flat real lease rate.
+Full-development gating: Lease payments occur only if solar is built. This is naturally enforced by the term $A_s$ in LeasePay (if $A_s = 0$, no lease paid). In other words, no scenario of “lease-only” without a solar project is considered. (This prevents the trivial solution of maximizing rent with no project: the model will require $A_s>0$ for any $L_{\text{solar}}>0$.)
+Solar CAPEX parameters (per-acre via capacity and unit costs): All solar capital costs are converted to a per-acre basis using $\alpha_{\text{ac/MW}}$:
+Installed PV cost (baseline): ((C^{\text{inst}}\ [$/W_{dc}] \approx 1.16)). This is the upfront cost per Watt_dc of solar (panels, inverters, installation). To relate to per-acre: first convert to $/MW_dc (1.16 $/W * $10^6$ W = $1.16M/MW_dc), then adjust for AC capacity per acre. For example, with a DC/AC ratio of ~1.3 and $\alpha_{\text{ac/MWac}} = 5.5$, 1 acre corresponds to about 0.18 MW_ac, which is 0.234 MW_dc; thus ~$0.234 \times 1.16M ≈ $271k/acre$. (Assumption: $1.16/W_dc is typical for utility-scale projects circa 2025; actual per-acre cost will depend on layout and DC/AC ratio. The model uses this to compute total cost.)
+Site preparation: ((C^{\text{siteprep}}\ [$/\text{acre}] \approx 36{,}800)). Cost per acre for preliminary site work – grading (basic), fencing, access roads, drainage improvements, etc. (Assumption: $36.8k/acre derived from a typical site prep cost of $200k for ~5.5 acres (1 MW); covers fencing, road, trenching, etc.)
+Grading (heavy earthwork): ((C^{\text{grade}}\ [$/\text{acre}] \in [5{,}524,; 11{,}048])). If the site is uneven, additional grading cost applies. We assume a range $5.5k–$11k per acre. (Assumption: Derived from $30k–$60k/MW for grading in rough terrain, spread over ~5.5 acres/MW. If land is flat, use low end; hilly, high end.)
+Interconnection upgrade fraction: ((\alpha^{\text{inter}} \in [0.20,;0.40])). Fraction of base PV capital that must be spent on grid network upgrades (transformers, lines) to interconnect. E.g. $\alpha^{\text{inter}}=0.3$ means 30% additional cost on top of PV equipment for interconnect. (Assumption: Based on data that interconnection upgrades can add 20–40% to project CAPEX in weaker grid areas. If the project is small or grid is strong, this can be on the low end or zero.)
+Solar OPEX / lifecycle parameters:
+Base O&M: ((C^{\text{O&M}}\ [$/\text{kW_ac-yr}] \approx 11)). Annual operations & maintenance cost per kW_ac. Converting to per-acre: ((C^{\text{O&M}}\ [$/\text{acre-yr}])) = $11 \times 1000 \text{ kW/ac} / \alpha_{\text{ac/MW}}$. For example, with 5.5 acres/MW_ac, $C^{\text{O&M}} \approx 11 \times 1000 \times (1/5.5) \approx $2,000$/acre-yr. (Assumption: $11/kW-yr covers monitoring, routine maintenance, inverter servicing, and panel cleaning.)
+Vegetation management: ((C^{\text{veg}}\ [$/\text{acre-yr}] \in [184,;265])). Cost to manage ground cover per acre per year (e.g. mowing, weed control or grazing management under panels). (Assumption: $184–$265 based on 2–3 mowings per year at $100/acre each plus some buffer; higher end if special pollinator habitat maintenance is needed.)
+Insurance: ((\text{OPEX}^{\text{ins}}_t)) – annual insurance premiums (liability and casualty insurance for solar array). Could be a fixed $/acre or % of asset value. (Assumption: Typically $5–$10/kW-yr; at 5.5 acres/MW that’s ~$5,500–$11,000/MW or $1k–$2k/acre. We keep it as an input stream for flexibility.)
+Inverter replacement: Inverter units typically need replacement once during project life. Let inverter lifespan ~12 years ((t_{\text{inv}} \in [10,15])). At year $t_{\text{inv}}$, incur ((\text{REPL}^{\text{inv}}{t{\text{inv}}} = A_s \cdot C^{\text{inv-repl}}\ [$/\text{acre}])). Assumption: C^{\text{inv-repl}} is ~10% of initial PV cost per acre. For instance, if initial per-acre PV cost was $270k, then inverter replacement ~$27k/acre at $t_{\text{inv}}$. We will include this one-time cost in year $t_{\text{inv}}$.
+Decommissioning / remediation / salvage: (Costs at end-of-life, year T)
+Decommissioning removal: ((C^{\text{decom}}\ [$/\text{kW}] \in [300,;440])) for dismantling and site clearance. Convert to $/acre: e.g. at $400/kW and using 5.5 acres/MW, ((C^{\text{decom}}\ [$/\text{acre}] ≈ 400 \times 1000 \times (1/5.5) ≈ $72,700)). (Assumption: $300–$440/kW based on industry estimates; covers dismantling racks, panels, inverter teardown, recycling logistics. We will use a mid value or scenario-based value.)
+Decommissioning bond: ((C^{\text{bond}}\ [$/\text{acre}] \ge 10{,}000)). Upfront or phased financial assurance (escrow or bond) per acre to ensure funds for future decom. (Assumption: Michigan PA 116 requires a decommissioning bond; many localities set a minimum, e.g. $10k/acre, updated periodically. We treat $10k/acre as a minimum carrying cost or an included CAPEX if set aside at start.)
+Site remediation: ((C^{\text{remed}}\ [$/\text{acre}] \approx 2{,}580)). Cost to restore soil and land after removal (decompacting soil, re-seeding with grass or crops). (Assumption: A moderate estimate; actual cost could include deep tillage, adding topsoil if eroded, etc.) Any additional costs (e.g., removal of access roads, fence) could be folded into this or decom. We assume this covers basic restoration.
+Salvage value: ((C^{\text{salv}}\ [$/\text{acre}] \in [12{,}000,;13{,}000])). Materials recovered at end have value: steel racks, aluminum frames, copper wiring, possibly resellable panels. (Assumption: Rough estimate assuming ~0.2 $/W of salvageable value at end; for 1 MW_ac (≈5.5 acres), that’s ~$200k salvage, ~$36k/acre. We use a conservative one-third of that given recovery inefficiencies, ~$12k/acre salvage.)
+Permitting / siting / interconnection inputs (expanded):
+Zoning compliance flag: ((Z \in {0,1})) – indicates local zoning/ordinance requirements are satisfied. We require $Z=1$ for any solar development (if $Z=0$, the project as proposed is not permitted). (This is effectively a binary constraint representing whether the design complies with land-use and permitting rules such as special use permits, setbacks, etc.)
+Zoning solar cap: ((A_{\text{zoning-allow}})) – maximum solar acreage allowed by local zoning. (Assumption: If a township ordinance caps utility-solar at e.g. 20% of farmland or an absolute acreage, that value is input here. If no explicit cap, $A_{\text{zoning-allow}} = A_{\text{tot}}$.)
+Setback loss fraction: ((\delta_{\text{setback}} \in [0,1])) – fraction of the total land that must remain unused due to setbacks (distance from roads, property lines, structures). (Assumption: For a roughly rectangular site, setbacks might take ~5–15% of area; e.g. $\delta_{\text{setback}}=0.10$ means 10% of $A_{\text{tot}}$ is off-limits for panels, though it could still be used for crops or remain fallow.)
+Height limit: ((h_{\max})) – maximum allowed height of solar structures (e.g. 20 ft by some local rule). Decision variable ((h_{\text{PV}})) = actual height used. (Assumption: For agrivoltaics, one might want taller racks for equipment clearance, but cannot exceed $h_{\max}$ without variance. $h_{\max}$ ~16–20 ft typical in ordinances. We will enforce $h_{\text{PV}} \le h_{\max}$.)
+Easement/covenant exclusion: ((A_{\text{easement}})) – area of the site encumbered by easements or covenants (e.g. utility ROW, drainage ditches, conservation easements) where solar cannot be installed. (Assumption: This is measured or given; if none, $A_{\text{easement}}=0$. If e.g. a powerline crosses the property taking 2 acres, then $A_{\text{easement}}=2$.)
+Wetland fill limits: ((W_{\text{fill}},;W_{\text{permit}})) – $W_{\text{fill}}$ = acres of wetlands the project design would fill or impact; $W_{\text{permit}}$ = threshold of wetland disturbance that triggers a special permit. (Assumption: Often if >~1/2 acre of wetland is disturbed, a permit is required. We will ensure $W_{\text{fill}}$ stays below that to avoid delays, if possible.)
+Moratorium indicator: ((m \in {0,1})) – if 1, a local moratorium on new solar is in effect (meaning no project can proceed now). (Assumption: We treat $m$ as an input; $m=0$ normally. If $m=1$, the model will effectively force $A_s=0$ due to constraint.)
+Interconnection capacity available: ((P_{\text{interconnect-available}})) – the maximum MW_ac that can be added at the grid connection without major system upgrades. (Assumption: Determined from utility interconnection studies; e.g. 5 MW available on the feeder before costly upgrades.)
+Planned PV capacity: ((P_{\text{PV}})) – decision variable for solar farm capacity (MW_ac). This is linked to $A_s$ (see Section 2).
+Earliest COD: ((\text{COD}{\min})) – earliest Commercial Operation Date (year) possible (e.g. due to interconnection queue). Decision variable $\text{COD}$ = actual COD year for the project. *(Assumption: If the interconnection process takes 3 years, and we are in 2025, $\text{COD}{\min}=2028$.)* We will enforce $\text{COD} \ge \text{COD}_{\min}$. (This affects cash flow start timing but is mainly a constraint to acknowledge.)
+Interconnection upgrade cost & cap: $C_{\text{upgrade}}(P_{\text{PV}})$ = function for grid upgrade cost based on capacity. We will approximate this as $\alpha^{\text{inter}}$ fraction of solar CAPEX (linear). ((C_{\text{upgrade,max}})) = maximum tolerable upgrade cost. (Assumption: If $C_{\text{upgrade,max}}$ is, say, $1M, the project size will be limited such that required upgrades do not exceed that.) We will use a constraint to ensure upgrade costs stay under this cap.
+Distribution penetration limits: Let $\text{PV_penetration}$ = fraction of local feeder peak load that this PV capacity represents. ((\text{PV_penetration}{\max})) = allowed maximum (e.g. 15% or 25%). We’ll ensure $\text{PV_penetration} \le \text{PV_penetration}{\max}$. (Assumption: This is to maintain voltage stability; if $P_{\text{peak}}$ is feeder peak load, $\text{PV_penetration} = P_{\text{PV}} / P_{\text{peak}}$.)
+Inverter power factor: ((\text{pf}{\min})) – minimum power factor (inductive) required by utility (e.g. 0.95). Decision variable $\text{pf}$ = power factor at which inverters operate (typically 1.0 or slightly lagging to control voltage). We enforce $\text{pf} \ge \text{pf}{\min}$. (Assumption: Most utilities require at least 0.9–0.95; we assume 0.95 for model.)
+Net-metering cap (if applicable): For behind-the-meter scenarios, ((P_{\text{NM}})) = portion of $P_{\text{PV}}$ under net-metering, and $\gamma_{\text{cap}}$ = fraction of the site’s peak load allowed. Constraint: ((P_{\text{NM}} \le \gamma_{\text{cap}} \cdot P_{\text{peak}})). (Assumption: Only relevant if modeling a smaller project offsetting on-site use. For utility-scale, $P_{\text{NM}}=0$.)
+Drain tile damage metric: ((D_{\text{tile-damage}})) – an estimate of drainage tile lines impacted by construction (e.g. length of tiles crushed). ((D_{\max})) = maximum allowable tile disturbance (possibly 0 if we promise no damage, or some small length that can be repaired). We will constrain $D_{\text{tile-damage}} \le D_{\max}$. (Assumption: If the land has subsurface irrigation drainage, the project either avoids or repairs tiles. We treat $D_{\max}=0$ as ideal, meaning all tiles avoided or rerouted.)
+Agrivoltaic design geometry: required clearances for farm equipment: panel minimum height ((\text{clearance})) and row spacing ((\text{row-spacing})). Given design variables for these, enforce ((\text{clearance} \ge \text{clearance}{\min})) and ((\text{row-spacing} \ge \text{row-spacing}{\min})). (Assumption: \text{clearance}{\min} e.g. 8 ft for tractors (or higher if combine use), \text{row-spacing}{\min} e.g. 20–30 ft to accommodate machinery and reduce shade on crops. These ensure the solar layout supports continued crop production adjacent or under arrays.)
+Farmland-preservation / “remain farmland” inputs (PA 116 agricultural use program):
+(Michigan’s PA 116 program provides tax credits for keeping land in ag use; solar can be allowed under certain conditions.)
+Ag-use acreage variable: ((A_{\text{ag}})) – acres that remain in bona fide agricultural use. (E.g. acres planted in crops or enrolled in federal set-aside like CRP.)
+Tillable, cleared acres: ((A_{\text{tillable,cleared}})) – acres of land that are cleared and could be tilled (excludes forest, wetlands, etc.). Used for determining income requirements on smaller parcels.
+Gross annual ag income: ((\text{GrossAgIncome})) – gross income per year from agriculture on the land (crop sales, grazing, etc.). For parcels 5–40 acres, Michigan requires a minimum $200/acre of tillable land.
+Definition of ag use: We only count land as $A_{\text{ag}}$ if it meets the criteria: production of plants or animals useful to humans, or participation in federal conservation programs (e.g. CRP). In model terms:
+[
+\text{AgUse} \in {\text{crop/livestock production, federal set-aside (CRP/etc.)}}.
+]
+(This is a note that $A_{\text{ag}}$ should correspond to such uses. In practice, $A_{\text{ag}}$ will equate to crop acres $A_c$ in our solution, since solar acres won’t count as ag use under PA 116.)
+PA 116 solar compatibility flags: These binary inputs indicate compliance with specific program conditions that allow solar on PA 116 land:
+((y_{\text{NRCS327}} \in {0,1})) – whether a pollinator habitat plan (NRCS practice #327) is implemented under the solar arrays. (Must be 1 (yes) to qualify.)
+((y_{\text{return-to-ag-first-growing-season}} \in {0,1})) – whether there is a commitment to restore the land to agricultural production in the first growing season after the solar project ends. (Must be 1.)
+((y_{\text{PA116-agreement-amended}} \in {0,1})) – whether the PA 116 agreement has been amended to allow this solar use. (Must be 1; an amendment is required before construction.)
+((y_{\text{PA116-term-extended}} \in {0,1})) – whether the PA 116 agreement’s term has been extended by the years the land is used for solar. (Must be 1; typically the agreement is extended by the solar project duration.)
+Pollinator habitat score: ((\text{Score}_{\text{poll}})) – score (0–100) from a pollinator habitat assessment for the solar site. To meet PA 116 condition, Score must be ≥76. (Assumption: 76 is the threshold defined by MI law for “pollinator-friendly solar” designation.)
+Decommissioning financial assurance: ((B_{\text{decom}})) – the dollar amount of the decommissioning bond or escrow set aside. This must be ≥ the engineer’s cost estimate for removal: $\widehat{C}_{\text{decom}}$.
+Tax credit deferment period: Let $\mathcal{T}{\text{defer}}$ be the set of years during which the land is used for solar and thus PA 116 tax credits are deferred (not paid). For each $t \in \mathcal{T}{\text{defer}}$, ((\text{PA116TaxCredit}_t = 0)). (Assumption: If the solar project operates years 1–20, then during those years the farmland tax credit is not received by the owner, per program rules. We include this to adjust the landowner’s cash flow, though it doesn’t affect the developer.)
+“Right land” siting inputs (to ensure project is on appropriate land):
+Land classification for solar: Partition $A_s$ into: farmland vs non-farmland, prime soils vs others, cleared vs forested. Use variables: ((A_{s,\text{farmland}})), ((A_{s,\text{nonfarmland}})), ((A_{s,\text{prime}})), ((A_{s,\text{cleared}})), ((A_{s,\text{forested}})). (Definitions: $A_{s,\text{farmland}}$ = solar acres on land currently zoned/used as farmland; $A_{s,\text{nonfarmland}}$ = solar acres on other land (brownfield, industrial, etc.); $A_{s,\text{prime}}$ = solar acres on prime agricultural soils (Class I/II); $A_{s,\text{cleared}}$ = solar acres on land that was already cleared/open (no forest); $A_{s,\text{forested}}$ = solar acres on forested land that would require tree clearing.)
+Prime farmland cap: ((A^{\max}{s,\text{prime}})) = maximum allowable acreage of prime soil used for solar. *(Assumption: Policy or developer preference might limit solar on prime soils – e.g. at most X acres or X% of project. If we set $A^{\max}{s,\text{prime}} = 0$, it forbids using prime farmland.)*
+Parcel set: If the project can choose among multiple parcels $p \in \mathcal{P}$, each parcel has attributes: slope, distance to grid, etc. We define those for completeness, though in many cases we’re focusing on a single site.
+Slope of parcel $p$: $\text{slope}(p)$, with allowable max ((\text{slope}_{\max})) (e.g. 5% or 8% grade).
+Distance from site to nearest substation or transmission: $\text{dist}(p,\text{substation})$, $\text{dist}(p,\text{transmission})$; define ((D_{\max})) as max acceptable distance (e.g. 1 mile).
+Hosting capacity of parcel: $H(p)$ (MW) – how much PV that location can accommodate on the grid side.
+(Assumption: We generally will pick one parcel or aggregate parcels such that these conditions are met, rather than actually selecting among many in the optimization.)
+Farmland-only siting assumption: We assume the project is on farmland (since this is an agrivoltaics scenario). So we intend to use only farmland for solar: no non-farmland. Thus $A_{s,\text{nonfarmland}}$ will be forced 0, and $A_s = A_{s,\text{farmland}}$. (This is a modeling choice aligning with analyzing impacts on farmland; if the project could use a non-farm brownfield, that’d be a different scenario.)
+No forest clearing: We assume no clearing of mature forests for solar. Thus $A_{s,\text{forested}} = 0$, and $A_s = A_{s,\text{cleared}}$. (All solar goes on land already cleared or in crops/pasture.)
+Slope constraint: Require each chosen solar parcel $p$ to have $\text{slope}(p) \le \text{slope}_{\max}$ (e.g. no panels on slopes >5%). This prevents trying to utilize steep land that would incur high cost or erosion issues. (If the available land has portions > slope_max, those portions effectively can’t be used in $A_s$.)
+Distance constraint: Require $\text{dist}(\text{site},\text{substation}) \le D_{\max}$ (and/or similar for transmission). This ensures the site is close enough to grid access to be viable. (Assumption: $D_{\max}$ might be ~1–2 miles; beyond that, line extension costs might be prohibitive unless accounted for in $\alpha^{\text{inter}}$.)
+State setback rules: Enforce explicit minimum setbacks (if not already captured by $\delta_{\text{setback}}$): e.g.
+((\text{setback}_{\text{road}} \ge 50\ \text{ft})) from road ROW,
+((\text{setback}_{\text{nonparticipant line}} \ge 50\ \text{ft})) from adjacent property lines,
+((\text{dist}(\text{fence},\text{occupied structure}) \ge 300\ \text{ft})) from any occupied home.
+These are typical values from guidelines to minimize nuisance. (We include them as constraints to ensure design feasibility. In practice, these reduce usable area – already reflected in $\delta_{\text{setback}}$, but listing them ensures compliance checks.)
+Parcel hosting capacity: If multiple parcels $p$, ensure the allocated PV on each does not exceed that parcel’s hosting capacity: $(P_{\text{PV}}(p) \le H(p)\ \forall p)$. In a single-site model, this is equivalent to the grid capacity constraint we already have for the whole site.
+Subsidy qualification inputs (target 50% ITC):
+The Inflation Reduction Act (IRA) provides a base 30% Investment Tax Credit for solar, plus potential adders. We target achieving a 50% ITC via adders.
+((\eta_{\text{ITC}} \in [0,1])) – effective ITC fraction of eligible solar CAPEX. We aim for $\eta_{\text{ITC}} = 0.50$ (50%).
+ITC adder qualification binaries:
+((y_{\text{PWA}} \in {0,1})) – Prevailing Wage & Apprenticeship requirements met. (Must be 1 to avoid ITC reduction; assume we will comply, so $y_{\text{PWA}}=1$.)
+((y_{\text{DC}} \in {0,1})) – Domestic Content requirement met (for +10% ITC). (We set $y_{\text{DC}}=1$ to get the adder, assuming using enough US-made components.)
+((y_{\text{EC}} \in {0,1})) – Energy Community location met (for +10% ITC). (We assume the site qualifies or we select a site that does, so $y_{\text{EC}}=1$.)
+With all three = 1, the ITC could be 30% base + 10% + 10% = 50%. (Assumption: Possibly one of the adders is not used if base 30% requires PWA anyway, but essentially we ensure 50% total. If only two adders apply, base 30 +210 = 50. We fix $\eta_{\text{ITC}}=0.50$ in our base model to simulate achieving this target.)*
+2. Data preprocessing
+Unit consistency: Convert all inputs to a common basis (annual real dollars, acres, MW_ac, etc.):
+All cash flows in constant dollars (use real discount rate $r$). If given a nominal discount and inflation, adjust $r$. For example, if $r_{\text{nom}}=8%$ and $\pi=3%$, then $r = (1.08)/(1.03) - 1 \approx 4.85%$.
+Ensure capacity in MW_ac and energy in kWh. (If energy yield given per kW_dc, convert using DC/AC ratio.)
+Land in acres throughout. (If some data was per hectare, convert: 1 ha = 2.471 ac.)
+Cost units: convert $/W to $/acre as needed using $\alpha_{\text{ac/MW}}$. Convert $/kW to $/acre similarly.
+This step ensures that when we form linear coefficients, everything aligns (e.g., we don’t mix up W_dc vs W_ac or nominal vs real dollars).
+Time index conversion: If any rates are monthly or quarterly, convert to annual. (Notably, if a monthly discount rate $r_m$ is provided, use $r = (1+r_m)^{12} - 1$ to get annual.) Our model primarily works on an annual timestep.
+Solar production modeling: Compute net energy output per year, per unit capacity (to eventually get revenue):
+Baseline energy yield: Let $E_0$ = first-year energy yield per kW_ac (or per MW_ac). For example, if capacity factor ~20%, then $E_0 \approx 0.2 \times 8760 \text{h} = 1752$ kWh per kW_ac. Apply degradation $d$ (fraction per year). For year $t$:
+E
+t
+=
+E
+0
+⋅
+(
+1
+−
+d
+)
+t
+.
+E 
+t
+​
+ =E 
+0
+​
+ ⋅(1−d) 
+t
+ .
+(Assumption: $d\approx0.5%$–$1%$/year; we’ll assume around 0.5% for modern panels.)
+Net available energy: Incorporate availability, curtailment, export limits:
+E
+t
+net
+=
+E
+t
+⋅
+ϕ
+t
+avail
+⋅
+ϕ
+t
+curt
+⋅
+ϕ
+t
+export
+.
+E 
+t
+net
+​
+ =E 
+t
+​
+ ⋅ϕ 
+t
+avail
+​
+ ⋅ϕ 
+t
+curt
+​
+ ⋅ϕ 
+t
+export
+​
+ .
+If there are no specific forced outages or curtailments, these $\phi$ terms are 1. Otherwise, e.g. if $\phi^{\text{curt}}=0.95$, that reduces energy by 5%. We assume $\phi^{\text{avail}}_t \approx 1$ (high uptime) unless maintenance, and $\phi^{\text{export}}_t=1$ unless we purposely limit exports (like in a net-metered scenario). In a utility PPA context, $\phi^{\text{export}}_t$ might be 1 (sell all generated).
+Crop yield modeling: If solar panels shade crops or alter yields, incorporate that via a factor. Let $Y_{j,0}$ be yield per acre for crop $j$ with no solar. If crop $j$ is grown under/near panels, define a reduction factor $f_j(\text{config},\text{layout},t)$ (could depend on panel height, spacing, and possibly improve over time as practices adapt). Then
+Y
+j
+,
+t
+=
+Y
+j
+,
+0
+⋅
+f
+j
+(
+config
+,
+layout
+,
+t
+)
+.
+Y 
+j,t
+​
+ =Y 
+j,0
+​
+ ⋅f 
+j
+​
+ (config,layout,t).
+If crop $j$ is grown on unshaded land, $f_j=1$. If doing agrivoltaics on the same land (panels and crops co-located), $f_j$ might be <1 (e.g. 0.8 if 20% yield reduction due to shade). For this model, we assume solar and crops are on separate acres (no overlapping use), so we don’t reduce yields on crop acres. Thus, if $A_{c,j}$ acres are farmed, they produce full yields, and solar acres $A_s$ produce no crops (but have the grazing/pollinator cover which we aren’t selling).
+Full-Dev capacity-to-area coupling: Since this is a full development model (no scenario of just leasing land to someone else), we enforce a strict relationship between solar capacity and area:
+Single configuration:
+P
+PV
+=
+A
+s
+α
+ac/MW
+(
+config
+)
+.
+P 
+PV
+​
+ = 
+α 
+ac/MW
+​
+ (config)
+A 
+s
+​
+ 
+​
+ .
+This is essentially $A_s = P_{\text{PV}} \times \alpha_{\text{ac/MW}}$. It links the continuous variables $A_s$ and $P_{\text{PV}}$. Given $\alpha_{\text{ac/MW}}$ (e.g. 6.0 ac/MW_ac for a particular setup), if $A_s=60$ acres, $P_{\text{PV}}=10$ MW_ac. This equation is linear.
+Multiple configuration (MILP) if needed: If we allow choosing config $k$ (with land intensity $\alpha_k$), introduce binary $y_k$ for each $k$ (e.g. fixed, tracker, etc.) with $\sum_k y_k = 1$. Then enforce:
+A
+s
+=
+∑
+k
+A
+s
+,
+k
+,
+0
+≤
+A
+s
+,
+k
+≤
+A
+tot
+  
+y
+k
+(
+∀
+k
+)
+,
+A 
+s
+​
+ = 
+k
+∑
+​
+ A 
+s,k
+​
+ ,0≤A 
+s,k
+​
+ ≤A 
+tot
+​
+ y 
+k
+​
+ (∀k),
+P
+PV
+=
+∑
+k
+A
+s
+,
+k
+α
+k
+.
+P 
+PV
+​
+ = 
+k
+∑
+​
+  
+α 
+k
+​
+ 
+A 
+s,k
+​
+ 
+​
+ .
+This ensures only one $y_k$ can be 1 (one config chosen), and ties $A_{s,k}$ usage to that config’s density. (This is a mixed-integer formulation. If we want to keep it a pure LP, we would pre-select a configuration and use the single equation above.) In our case, we can assume a single config (say one-axis tracker) for simplicity and use its $\alpha$.
+Lifecycle cash flow assembly: We will assemble cash flow components by year, which become the basis for NPV and constraints:
+Solar CAPEX at $t=0$:
+CAPEX
+0
+solar
+=
+A
+s
+(
+C
+const
++
+C
+siteprep
++
+C
+grade
++
+C
+bond
+)
++
+CAPEX
+0
+inter
+,
+CAPEX 
+0
+solar
+​
+ =A 
+s
+​
+ (C 
+const
+ +C 
+siteprep
+ +C 
+grade
+ +C 
+bond
+ )+CAPEX 
+0
+inter
+​
+ ,
+where each $C$ is in $/acre. Here:
+$C^{\text{const}}$ = installed PV equipment cost per acre (derived via $\alpha_{\text{ac/MW}}$ and $C^{\text{inst}}$/W),
+$C^{\text{siteprep}}$, $C^{\text{grade}}$, $C^{\text{bond}}$ per acre as given,
+$\text{CAPEX}^{\text{inter}}_0$ = interconnection upgrade cost upfront. If using $\alpha^{\text{inter}}$ as fraction,
+CAPEX
+0
+inter
+=
+α
+inter
+⋅
+(
+A
+s
+⋅
+C
+const
+)
+,
+CAPEX 
+0
+inter
+​
+ =α 
+inter
+ ⋅(A 
+s
+​
+ ⋅C 
+const
+ ),
+(i.e. if 30% upgrades, add 0.3 * equipment cost portion). If a more detailed cost function for upgrades is known, that could replace this linear approximation.
+Assumption: Land purchase is not included here since we assume a lease model (land remains owned by farmer). If the model were to consider a purchase scenario, $\text{CAPEX}^{\text{land}}_0$ would add, but in FULL-DEV lease path, land cost is paid via lease, not upfront. We ensure not to double-count land cost: we either have purchase CAPEX or lease payments, not both. Here we go with lease.
+Solar OPEX (annual, $t=1$ to $T$): \text{OPEX}^{\text{solar}}_t = A_s \Big(C^{\text{O&M}} + C^{\text{veg}}\Big) + \text{OPEX}^{\text{ins}}_t + \text{OPEX}^{\text{other}}_t. This covers base O&M and vegetation management per acre, plus any insurance or other overhead in that year. (We treat insurance as a separate line if it varies or escalates.) If insurance is roughly constant per year, we could include it in $C^{\text{O&M}}$ per acre, but listing separately allows escalation or different profiles.
+Solar lease payments (annual, $t=1$ to $T$):
+LeasePay
+t
+=
+A
+s
+⋅
+L
+solar
+.
+LeasePay 
+t
+​
+ =A 
+s
+​
+ ⋅L 
+solar
+​
+ .
+This is a cost to the developer each year (and equal revenue to the landowner). In the developer’s cash flow, it will appear as a negative (outflow). We assume no escalation in this lease for now (i.e. constant real value). If needed, we could incorporate an escalation factor $g_{\text{lease}}$.
+Crop revenues & costs (annual):
+For completeness: $\text{Revenue}^{\text{crop}}t = \sum_j A{c,j} Y_{j,t} P^{\text{crop}}{j,t}$. Crop operating costs per acre (seeds, fertilizer, etc.) can be denoted $C^{\text{op}}{\text{crop},j}$, so $\text{Cost}^{\text{crop}}t = \sum_j A{c,j} C^{\text{op}}_{\text{crop},j}$ if we assume constant annual cost. These will be used to calculate net cash flows for the farmer side. (The developer side does not bear these costs or revenues.)
+Mid-life replacement: At $t = t_{\text{inv}}$ (e.g. year 12):
+REPL
+t
+inv
+=
+A
+s
+⋅
+C
+inv-repl
+,
+REPL 
+t 
+inv
+​
+ 
+​
+ =A 
+s
+​
+ ⋅C 
+inv-repl
+ ,
+adding that one-time cost (inverter replacement). If $t_{\text{inv}}$ is not an integer year (say mid-year), we could approximate to nearest year. We might set $t_{\text{inv}}=15$ for simplicity (half-life replacement).
+End of life (t = T) cash flows:
+Decommissioning cost:
+DECOM
+T
+=
+A
+s
+(
+C
+decom
++
+C
+remed
+)
+.
+DECOM 
+T
+​
+ =A 
+s
+​
+ (C 
+decom
+ +C 
+remed
+ ).
+Salvage value:
+SALV
+T
+=
+A
+s
+⋅
+C
+salv
+.
+SALV 
+T
+​
+ =A 
+s
+​
+ ⋅C 
+salv
+ .
+In the cash flow, DECOM is an outflow (negative) and SALV an inflow (positive). Often, the bond $B_{\text{decom}}$ would have been set aside, but here we treat the cost at end (and we included bond as a small CAPEX cost or just as a requirement constraint). The model will account for net (DECOM - SALV) at T in NPV.
+Subsidy (ITC) application: The Investment Tax Credit provides a lump benefit at project start (or within the first tax year). We apply it as a reduction to effective CAPEX:
+CAPEX
+0
+solar,net
+=
+(
+1
+−
+η
+ITC
+)
+⋅
+CAPEX
+0
+solar
+.
+CAPEX 
+0
+solar,net
+​
+ =(1−η 
+ITC
+​
+ )⋅CAPEX 
+0
+solar
+​
+ .
+With $\eta_{\text{ITC}}=0.50$, the developer effectively bears only 50% of the solar capital cost in NPV terms (assuming they monetize the credit fully). We will use $\text{CAPEX}^{\text{solar,net}}0$ in NPV calculations and the developer NPV constraint. *(If $\eta{\text{ITC}}$ changes in scenarios, it directly scales the initial cost.)*
+Constraint matrix construction: At this stage, we identify all decision variables and formulate constraints in matrix form $A x \le b$. We derive linear coefficients (objective vector $c$) for the objective function (see Section 6). This ensures the optimization model is fully specified in standard form.
+3. Decision variable definitions
+Continuous decision variables:
+((A_s \ge 0)) – acres allocated to solar (full-development). This is a primary decision: how much land to use for PV.
+((A_{c,j} \ge 0)) – acres allocated to crop $j$ (for each $j=1,\dots,J$). The total crop acres $A_c = \sum_j A_{c,j}$. (We could also have one aggregated crop variable if treating all crops the same, but keeping by type allows crop rotations or different profits.)
+(If needed: ((A_c \ge 0)) – total crop acres, but we can use $A_c$ as a shorthand = $\sum_j A_{c,j}$.)*
+((P_{\text{PV}} \ge 0)) – solar PV capacity (MW_ac) installed. This is tied to $A_s$ by $P_{\text{PV}} = A_s/\alpha_{\text{ac/MW}}$. Including it as a variable makes it easier to impose MW-based constraints (like interconnection limits).
+((h_{\text{PV}} \ge 0)) – height of PV panels (feet or meters). Used to enforce $h_{\text{PV}} \le h_{\max}$. It might also implicitly affect $f_j(\cdot)$ for crop yield (taller = less shading on crops), but we did not explicitly model that dependency except to ensure a minimum for equipment.
+((\text{pf} \in [0,1])) – inverter power factor. We expect the solution to simply set $\text{pf} = \text{pf}_{\min}$ if that is required (no objective incentive to go higher except maybe to avoid curtailment which we haven’t modeled, so it will likely just meet minimum).
+((\text{COD} \ge 0)) – Commercial Operation Date (year). Could be a continuous variable in our linear model, but effectively we will set a lower bound $\text{COD}{\min}$. Since this doesn’t directly affect objective (unless we discounted cash flows differently), we include it mainly to ensure $\text{COD} \ge \text{COD}{\min}$. We won’t need to optimize over COD; we can set COD = COD_min if project built as soon as allowed. (In a more detailed model, one might choose to delay COD if it aligns better with prices or budgets, but we assume as soon as ready.)
+Farmland preservation continuous variables:
+((A_{\text{ag}} \ge 0)) – acres considered in agricultural use. Likely we will have $A_{\text{ag}} = A_c$ (since only crop acres count). If we had some solar acres still counting (like grazing under panels), that could add, but for now, no – unless specified otherwise, $A_{\text{ag}} = A_c$.
+((A_{\text{tillable,cleared}} \ge 0)) – acres of land that are both cleared and could be tilled. For our site, if it’s all farmland, $A_{\text{tillable,cleared}}$ might equal $A_{\text{tot}}$ minus any truly non-tillable areas (like wetlands, but those we excluded or they count as cleared? Actually wetlands are not “tillable”). For simplicity, if the site was all farmland, $A_{\text{tillable,cleared}} = A_{\text{tot}}$ minus forest/wetland area. We can treat it as a known input.
+((\text{GrossAgIncome} \ge 0)) – gross annual agricultural income (in $). In practice, $\text{GrossAgIncome} = \sum_j A_{c,j} Y_{j,t} P^{\text{crop}}_{j,t}$ (for a given year’s yields and prices). If yields/prices vary annually, this is time-dependent; however, the PA 116 rule uses a fixed threshold $200/acre which likely is evaluated yearly. We can use initial year or an average year for this constraint. We’ll implement it as if it must hold initially (or in a representative year).
+Land-class allocation variables: (to track siting categories for constraints)
+((A_{s,\text{farmland}} \ge 0)) – solar acres on farmland.
+((A_{s,\text{nonfarmland}} \ge 0)) – solar acres on non-farmland. (We will enforce $A_{s,\text{nonfarmland}}=0$ for our scenario.)
+((A_{s,\text{prime}} \ge 0)) – solar acres on prime soil.
+((A_{s,\text{cleared}} \ge 0)) – solar acres on cleared land.
+((A_{s,\text{forested}} \ge 0)) – solar acres on forested land. (We will enforce $A_{s,\text{forested}}=0$.)
+These are not independent decisions but are linked to $A_s$. We include them to impose constraints like $A_{s,\text{prime}} \le A^{\max}{s,\text{prime}}$, etc. Relationships: $A_s = A{s,\text{farmland}} + A_{s,\text{nonfarmland}} = A_{s,\text{cleared}} + A_{s,\text{forested}}$, etc., will be enforced.
+Lease rate variable:
+((L_{\text{solar}} \ge 0)) – solar lease payment per acre ($/yr). This is unusual as a decision variable in a single-level model (price usually outcome of a negotiation between two parties). But here, we include it to determine the maximum feasible lease the developer can pay while meeting their financial criteria. It will be the objective of Stage A optimization. We have bounds $L_{\min}, L_{\max}$ as given.
+Binary (0–1) decision variables:
+((y_k \in {0,1})) – configuration choice binaries, if applicable. One for each config type k (fixed, tracker, etc.), with $\sum_k y_k = 1$. If $y_k=1$, that config is selected and its $\alpha_k$ applies. (If we assume a fixed config upfront, we can omit these to keep the model linear.)
+((z_{\text{repower}} \in {0,1})) – repowering decision at end of project. $z_{\text{repower}}=1$ might indicate we choose to replace panels and continue (instead of decommission at year T). If $z_{\text{repower}}=0$, we fully decommission at T. (For simplicity, we may not use this in the optimization, as we have not built out the repower scenario cash flows. It’s noted for completeness if exploring extend vs terminate.)
+Permitting compliance binaries:
+((y_{\text{glare}} \in {0,1})) – whether glare mitigation requirements are satisfied (e.g., glare study done, mitigations in place). Many ordinances require “no glare” for drivers/neighboring properties. We assume we will comply, so we will set $y_{\text{glare}}=1$ in any feasible solution.
+((y_{\text{decom-plan}} \in {0,1})) – whether a decommissioning plan has been submitted/approved. Typically required by counties before construction. We also set $y_{\text{decom-plan}}=1$ (the model must include a decom plan). These binaries effectively must be 1 for $Z=1$. We will enforce them.
+Subsidy qualification binaries: ((y_{\text{PWA}}, y_{\text{DC}}, y_{\text{EC}} \in {0,1})) as defined earlier. We will enforce each = 1 to achieve the 50% ITC. (We could allow the model to choose not to meet them if, say, domestic content raises cost, but we have not modeled a cost penalty for domestic content. So we simply assume they are met.)
+PA 116 compliance binaries: ((y_{\text{NRCS327}}, y_{\text{return-to-ag-first-growing-season}}, y_{\text{PA116-agreement-amended}}, y_{\text{PA116-term-extended}} \in {0,1})). All of these must equal 1 to satisfy PA 116 solar use conditions. We will treat them as requirements (the model won’t choose them; we set them =1 as part of feasible solution definition). If any were 0, the project would violate the PA 116 agreement unless the land was withdrawn (which is another scenario not covered here).
+Zoning pathway binary: ((Z \in {0,1})) – as above, indicates if the project meets zoning. We require $Z=1$. We won’t let the model choose $Z$; rather, $Z$ is an input reflecting whether the design is permissible. We include it as a binary in case we want to enforce $Z=1$ through meeting other constraints (like $y_{\text{glare}}=1$, etc., might be part of what makes $Z=1$ feasible).
+Bounds and logical relations:
+Land use bounds:
+0
+  
+≤
+  
+A
+s
+  
+≤
+  
+A
+tot
+,
+0
+  
+≤
+  
+A
+c
+,
+j
+  
+≤
+  
+A
+tot
+∀
+j
+.
+0≤A 
+s
+​
+ ≤A 
+tot
+​
+ ,0≤A 
+c,j
+​
+ ≤A 
+tot
+​
+ ∀j.
+Obviously, cannot use negative or more than available land. If needed, we have $A_s + \sum_j A_{c,j} \le A_{\text{tot}}$ as a constraint (coming in Section 7).
+We define total crop land $A_c = \sum_{j=1}^J A_{c,j}$. We might not explicitly need a variable $A_c$ since it’s an expression, but sometimes it’s convenient.
+Lease bounds:
+L
+min
+⁡
+  
+≤
+  
+L
+solar
+  
+≤
+  
+L
+max
+⁡
+.
+L 
+min
+​
+ ≤L 
+solar
+​
+ ≤L 
+max
+​
+ .
+So $500 \le L_{\text{solar}} \le 1200$ (in $/acre-year). If the optimization tries to exceed $L_{\max}$, it will be capped. (If it tries to go below $L_{\min}$ – unlikely since we’d be maximizing $L$ – but if for some reason, we can also constrain that, or $L_{\min}$ can be 0 if we allow any low lease.)
+Land class relations:
+$A_s = A_{s,\text{farmland}} + A_{s,\text{nonfarmland}}$. We will enforce $A_{s,\text{nonfarmland}}=0$, hence $A_s = A_{s,\text{farmland}}$.
+$A_s = A_{s,\text{cleared}} + A_{s,\text{forested}}$. We enforce $A_{s,\text{forested}}=0$, so $A_s = A_{s,\text{cleared}}$.
+$A_{s,\text{prime}} \le A_{s,\text{farmland}}$ (prime is a subset of farmland). If needed, also $A_{s,\text{prime}} \le A_s$. (Trivially true if all $A_s$ is farmland and some farmland may be non-prime.)
+These will be part of constraints to ensure consistency.
+Agricultural use and preservation:
+Likely $A_{\text{ag}} = A_c$ in our case (all crop land counts). If there were CRP acres not actively cropped, those could count too, but we don’t have a separate variable for that (we could treat a fallow or cover-cropped acre as still ag use and include it in some $A_{c,j}$ category).
+If the site is >40 acres, we’ll have the 51% rule constraint. If 5–40 acres, we have both 51% and income constraint. (We may not explicitly model scenarios <40 vs >40 separately; we can include both constraints and note the income one is only relevant if $A_{\text{tot}}<40$.)
+4. Financial calculations engine
+Revenue calculations:
+Solar energy revenue (developer): In year $t$, revenue from selling electricity:
+Rev
+t
+solar
+=
+A
+s
+⋅
+E
+t
+net
+⋅
+P
+t
+elec,sell
+.
+Rev 
+t
+solar
+​
+ =A 
+s
+​
+ ⋅E 
+t
+net
+​
+ ⋅P 
+t
+elec,sell
+​
+ .
+Here $A_s \cdot E^{\text{net}}_t$ = total kWh produced in year $t$ (since $E^{\text{net}}_t$ is kWh per acre, including all derate factors), and multiplying by price $P^{\text{elec,sell}}_t$ gives dollars. For instance, if $A_s=50$ acres, $E^{\text{net}}_t=1,500$ kWh/acre (after losses) and $P^{\text{elec,sell}}_t=$0.05$/kWh, then $\text{Rev}^{\text{solar}}_t = 50 \times 1500 \times 0.05 = $3,750$ for that year. (Of course, typical utility-scale output would be higher kWh/acre; this is just an illustration.)
+If $P^{\text{elec,sell}}_t$ escalates, then $\text{Rev}^{\text{solar}}_t$ should incorporate that year’s price.
+We note that this revenue is at wholesale/PPA rates, not retail – emphasizing that the project sells at e.g. 5–6¢/kWh, not 19¢.
+Crop revenue (farmer):
+Rev
+t
+crop
+=
+∑
+j
+=
+1
+J
+A
+c
+,
+j
+⋅
+Y
+j
+,
+t
+⋅
+P
+j
+,
+t
+crop
+.
+Rev 
+t
+crop
+​
+ = 
+j=1
+∑
+J
+​
+ A 
+c,j
+​
+ ⋅Y 
+j,t
+​
+ ⋅P 
+j,t
+crop
+​
+ .
+For each crop $j$, acres times yield times price gives revenue. If multiple crops, sum them. If $J=1$ (one crop or one aggregate “crop”), this simplifies to $A_c \cdot Y_t \cdot P_t$. Crop yields $Y_{j,t}$ could be constant or vary with time (e.g. trend or rotation effects), and prices $P^{\text{crop}}{j,t}$ might escalate by $g{\text{crop},j}$. We can assume relatively steady yields for simplicity and maybe a mild price increase.
+Total revenue (system perspective):
+Rev
+t
+=
+Rev
+t
+solar
++
+Rev
+t
+crop
+.
+Rev 
+t
+​
+ =Rev 
+t
+solar
+​
+ +Rev 
+t
+crop
+​
+ .
+If we were looking at combined farm + solar enterprise. However, note that in the developer’s financials, they only get $\text{Rev}^{\text{solar}}_t$. In the farmer’s financials, they get $\text{Rev}^{\text{crop}}_t$ plus the lease payments (coming as cost to developer). We will keep track of those separately when evaluating each party.
+Cost calculations (expanded for Full-Dev): We define total costs each year as:
+Cost
+t
+=
+CAPEX
+t
++
+OPEX
+t
++
+LeasePay
+t
++
+REPL
+t
++
+DECOM
+t
+−
+SALV
+t
+.
+Cost 
+t
+​
+ =CAPEX 
+t
+​
+ +OPEX 
+t
+​
+ +LeasePay 
+t
+​
+ +REPL 
+t
+​
+ +DECOM 
+t
+​
+ −SALV 
+t
+​
+ .
+Most of these terms are zero in most years, except where they apply:
+$\text{CAPEX}_t$ is nonzero in construction years (e.g. $t=0$ or $t=0,1$ if spread).
+$\text{OPEX}_t$ is annual (solar O&M, veg, insurance, plus if considering from combined view, also crop inputs; but from developer view, OPEX is just solar O&M/insurance).
+$\text{LeasePay}_t$ is annual (only if $A_s>0$).
+$\text{REPL}t$ hits at $t=t{\text{inv}}$.
+$\text{DECOM}_t$ and $\text{SALV}_t$ occur at $t=T$.
+This formula covers all relevant cash outflows (costs) and inflows (salvage) in a single expression (with salvage as negative cost).
+From a developer’s perspective, the cash flows would include:
+CAPEX (solar net of ITC) outflow,
+OPEX outflows (solar),
+Lease outflows,
+Replacement outflow,
+Decom outflow, salvage inflow.
+They do not include crop costs or revenues (those belong to farmer).
+From a farmer’s perspective:
+There’s no solar CAPEX outflow (developer paid it). The farmer might have their own CAPEX if they invest in farm equipment for crops, but we haven’t explicitly modeled that beyond maybe assuming they already have it (or it’s small per acre relative to solar CAPEX).
+OPEX for farmer is crop input costs on $A_c$.
+They receive lease payments as inflow, receive crop revenue as inflow, and have crop costs as outflow.
+At end, they might need to consider if any restoration costs fall on them after decom (likely not, developer covers decom including remediation by our model, and bond ensures that).
+They lose tax credits during the solar period (modeled via $\text{PA116TaxCredit}_t = 0$ during deferment, which is effectively a cost in opportunity terms).
+For our optimization, we are mostly focusing on the developer’s NPV to determine $L_{\text{solar}}$, then on the farmer’s objective (which will include lease and crop net income) to allocate land. Discounting: We use a discount factor for each year:
+DF
+t
+=
+1
+(
+1
++
+r
+)
+t
+.
+DF 
+t
+​
+ = 
+(1+r) 
+t
+ 
+1
+​
+ .
+If $t$ is in years and $r$ is the annual real discount rate, this gives present value weights. (For $t=0$, $\text{DF}_0 = 1$.) The present value of any cash flow series ${X_t}$ is:
+PV
+(
+X
+)
+=
+∑
+t
+=
+0
+T
+X
+t
+⋅
+DF
+t
+.
+PV(X)= 
+t=0
+∑
+T
+​
+ X 
+t
+​
+ ⋅DF 
+t
+​
+ .
+We will apply this to compute things like NPV of the project for the developer and farmer. Key financial metrics:
+Net Cash Flow (NCF) each year:
+NCF
+t
+=
+Rev
+t
+−
+Cost
+t
+,
+NCF 
+t
+​
+ =Rev 
+t
+​
+ −Cost 
+t
+​
+ ,
+where Rev and Cost are as defined above. For example, at $t=0$, $\text{NCF}_0 = 0 - \text{CAPEX}_0$ (a large negative outflow, except for any ITC inflow we effectively accounted by reducing CAPEX). During operation years, $\text{NCF}_t = \text{Rev}^{\text{solar}}_t + \text{Rev}^{\text{crop}}_t - (\text{OPEX}_t + \text{LeasePay}_t + \text{crop costs})$ (depending on perspective). We have to be careful: if we’re doing developer’s NCF, we wouldn’t include $\text{Rev}^{\text{crop}}_t$ or crop costs. If doing combined, include everything.
+Net Present Value (NPV):
+NPV
+=
+∑
+t
+=
+0
+T
+NCF
+t
+⋅
+DF
+t
+.
+NPV= 
+t=0
+∑
+T
+​
+ NCF 
+t
+​
+ ⋅DF 
+t
+​
+ .
+This is the objective we often maximize for a pure economic optimization (for combined or one stakeholder). We will use NPV in a constraint to ensure the developer at least breaks even.
+Benefit-Cost Ratio (BCR):
+BCR
+=
+∑
+t
+=
+0
+T
+Rev
+t
+⋅
+DF
+t
+∑
+t
+=
+0
+T
+Cost
+t
+⋅
+DF
+t
+.
+BCR= 
+∑ 
+t=0
+T
+​
+ Cost 
+t
+​
+ ⋅DF 
+t
+​
+ 
+∑ 
+t=0
+T
+​
+ Rev 
+t
+​
+ ⋅DF 
+t
+​
+ 
+​
+ .
+If BCR > 1, the project’s discounted benefits exceed costs. (BCR is >1 iff NPV > 0 basically, for positive costs.) We won’t directly use BCR in constraints, but it’s a reported metric.
+Internal Rate of Return (IRR): the discount rate that yields NPV = 0. We cannot directly compute IRR in the LP, but we will compute it from the cash flows after solving, for information. Typically, if NPV = 0 at discount r, then r is the IRR (for developer if we set NPV_min=0 with our chosen r, it implies IRR = r for developer’s cash flows). We’ll verify IRRs in post-processing.
+Payback period: number of years until cumulative cash flow turns positive. Again, not a decision factor, but we can calculate it from the NCF stream afterward for insight (or enforce a constraint like payback <= N years by linear approximation, but we won’t here).
+Farmer lease revenue accounting: We emphasize that $\text{LeasePay}t = A_s \cdot L{\text{solar}}$ is an outflow for the developer but an inflow for the farmer. When we switch to the farmer’s perspective in Stage B, we will treat
+FarmerLeaseRev
+t
+=
+A
+s
+⋅
+L
+solar
+FarmerLeaseRev 
+t
+​
+ =A 
+s
+​
+ ⋅L 
+solar
+​
+ 
+as part of the farmer’s revenue each year (in addition to crop revenue). The farmer’s net cash flow will be $\text{FarmerLeaseRev}_t + \text{Rev}^{\text{crop}}_t - \text{CropCost}_t - \text{TaxCreditLoss}_t$ (where TaxCreditLoss is the forgone PA 116 credit in those years, which we can treat as a reduction in revenue or an added cost). By separating these, we can clearly see how much of the farmer’s income is coming from solar vs farming.
+5. Financing calculations (optional)
+(If we incorporate project financing structure, e.g. debt, we would include these calculations. The current model can be solved without explicitly modeling debt by using a higher discount rate to reflect cost of capital. However, for completeness, we outline how debt could be integrated or at least checked.)
+Debt amortization: Suppose the project uses debt covering fraction $f_D$ of initial capital. Let initial debt $D_0 = f_D \cdot \text{CAPEX}^{\text{solar,net}}_0$ (assuming landowner doesn’t take debt for their part, just developer for solar CAPEX). With interest rate $i_d$ and term $N_d$ years, the annual debt service (constant annuity payment) is:
+DS
+=
+D
+0
+⋅
+i
+d
+(
+1
++
+i
+d
+)
+N
+d
+(
+1
++
+i
+d
+)
+N
+d
+−
+1
+.
+DS=D 
+0
+​
+ ⋅ 
+(1+i 
+d
+​
+ ) 
+N 
+d
+​
+ 
+ −1
+i 
+d
+​
+ (1+i 
+d
+​
+ ) 
+N 
+d
+​
+ 
+ 
+​
+ .
+This is fixed each year for $t=1$ to $N_d$. We can compute interest and principal portions:
+Interest in year $t$:
+Int
+t
+=
+i
+d
+⋅
+B
+t
+−
+1
+,
+Int 
+t
+​
+ =i 
+d
+​
+ ⋅B 
+t−1
+​
+ ,
+where $B_{t-1}$ is the remaining balance at end of previous year. Initially $B_0 = D_0$.
+Principal in year $t$:
+Prin
+t
+=
+DS
+−
+Int
+t
+.
+Prin 
+t
+​
+ =DS−Int 
+t
+​
+ .
+Then update balance $B_t = B_{t-1} - \text{Prin}t$. After $N_d$ payments, $B{N_d}=0$.
+We could integrate this by subtracting DS from project cash flows (since DS is paid out of project revenues). But typically, we separate the project NCF (which services debt) from equity NCF (after debt payments).
+Equity cash flows and DSCR:
+Cash Flow Available for Debt Service (CFADS) = project NCF (before debt payments) each year. In our context, project NCF (developer) from operations would be revenue minus O&M minus lease, etc., but before interest. Actually, if interest is considered a cost, we’d add it back to get CFADS. It’s easier to take CFADS = EBITDA of project (earnings before interest, taxes, depreciation/amortization). In our cash flows, $\text{NCF}_t$ is after all operating costs but before financing costs (we haven’t included interest as a cost in NCF). So we can take $\text{CFADS}_t = \text{NCF}_t$ (since we didn’t subtract interest anywhere).
+Debt Service Coverage Ratio:
+DSCR
+t
+=
+CFADS
+t
+DS
+t
+.
+DSCR 
+t
+​
+ = 
+DS 
+t
+​
+ 
+CFADS 
+t
+​
+ 
+​
+ .
+Lenders typically require DSCR >= 1.2 (for example) to ensure a safety margin. If we wanted to enforce that, we’d add: $\text{CFADS}_t \ge 1.2 \cdot \text{DS}_t$ for each year $t$ of debt. That is a nonlinear constraint (since DS is constant, but CFADS and DSCR form a ratio). We could linearize roughly or enforce minimum yearly DSCR by introducing variables, but for simplicity we didn’t include it in core constraints. Instead, we ensure NPV >= 0 for developer (which is akin to equity NPV >= 0). If needed, we can check DSCR in post-analysis and see if the solution would satisfy typical financing criteria or not.
+Equity NCF:
+NCF
+t
+equity
+=
+NCF
+t
+−
+DS
+t
+(
+t
+=
+1
+,
+…
+,
+N
+d
+)
+.
+NCF 
+t
+equity
+​
+ =NCF 
+t
+​
+ −DS 
+t
+​
+ (t=1,…,N 
+d
+​
+ ).
+After debt service, what remains for the equity investor. We could compute equity IRR from these equity cash flows (including initial equity outlay = $\text{CAPEX}_0 - D_0$ at $t=0$ and any residual value after debt, but since debt typically fully amortized by $N_d$, after that equity gets full project NCF).
+In summary, we won’t directly optimize with these financing variables, but once we have the project cash flows, we can apply this structure to see if the project is financeable. We might for example check: at $L_{\text{solar}}^*$, does the project yield DSCR > 1.2 on average? If not, that lease might actually be too high for banks (implying NPV=0 might be okay for equity, but risk is high). This is beyond our current model’s linear constraints, so we flag it as a consideration.
+6. Objective function construction
+We have a two-stage objective approach to handle the lease price determination and land allocation separately:
+6.1 Developer-side “maximum feasible lease” objective (Stage A)
+Objective (Stage A):
+max
+⁡
+  
+L
+solar
+maxL 
+solar
+​
+ 
+We seek the highest lease rate $/acre that the developer can pay while still meeting a minimum viability criterion (NPV threshold). We treat $L_{\text{solar}}$ as the decision variable to maximize. Key constraint – Developer NPV requirement: We impose that the developer’s project NPV must be at least some minimum acceptable level:
+∑
+t
+=
+0
+T
+NCF
+t
+(dev)
+⋅
+DF
+t
+  
+≥
+  
+NPV
+min
+⁡
+(dev)
+.
+t=0
+∑
+T
+​
+ NCF 
+t
+(dev)
+​
+ ⋅DF 
+t
+​
+ ≥NPV 
+min
+(dev)
+​
+ .
+$\text{NCF}_t^{\text{(dev)}}$ is the developer’s net cash flow in year $t$ (solar revenues minus solar costs, including lease payments).
+$\text{NPV}{\min}^{\text{(dev)}}$ is a threshold set by the developer. Commonly, this might be 0 (break-even NPV at discount rate $r$), representing that the developer at least doesn’t lose money (and effectively achieves IRR = $r$). We can use 0 for a break-even requirement. If the developer requires a positive NPV (for profit) or a higher IRR, we could set $\text{NPV}{\min}$ to some positive value, but that would tighten the constraint.
+This constraint is linear because $\text{NCF}t^{\text{(dev)}}$ is linear in the decision variables ($A_s$ and $L{\text{solar}}$ primarily). We can explicitly write $\text{NCF}_t^{\text{(dev)}} = \text{Rev}^{\text{solar}}_t - (\text{OPEX}^{\text{solar}}_t + \text{LeasePay}_t + \text{REPL}_t + \text{DECOM}_t - \text{SALV}t)$ for each $t$. When we plug in $\text{LeasePay}t = A_s L{\text{solar}}$, etc., the left side becomes a linear expression in $A_s$ and $L{\text{solar}}$ (and possibly other variables like if $A_s$ affects revenue linearly, which it does, etc.). So it is suitable as a linear constraint.
+Intuitively, this constraint ensures that if $L_{\text{solar}}$ is set very high, the developer’s NPV (which decreases as lease payments increase) does not fall below the acceptable threshold. The model will increase $L_{\text{solar}}$ until this NPV constraint is just binding (or another constraint, like max lease or land available, stops it). Thus we find the maximum rent that still leaves the developer with $\text{NPV}_{\min}$.
+(We will set $\text{NPV}_{\min}^{\text{(dev)}} = 0$ for break-even unless instructed otherwise. This essentially means the developer is willing to undertake the project if it at least breaks even at discount rate $r$. In reality, a developer might want NPV > 0 or require a certain IRR, but for maximizing lease, we’ll push them to their break-even point.) Other constraints from Section 7 (land availability, interconnect, 51% rule, etc.) also apply in Stage A, because they can restrict $A_s$ and other decisions, which in turn affect feasibility and NPV. Important: We should avoid the trivial solution $A_s = 0$ with a high $L_{\text{solar}}$. If $A_s=0$, developer NPV is 0 (no cost, no revenue), satisfying NPV ≥ 0, and the objective could drive $L_{\text{solar}}$ to $L_{\max}$ with no project built – which is not a valid scenario (no project actually occurs). To prevent this, we implicitly assume we are considering solutions with $A_s > 0$. In practice, we can add a tiny constraint like $A_s \ge \epsilon$ or simply note that a solution with $A_s=0$ and $L_{\text{solar}}$ high is not implementing a project. We will exclude that by focusing on solutions where some solar is built. (One way is to require $A_s \ge 1$ acre if any solar at all – since partial acreage below that is unrealistic anyway. We’ll assume $A_s$ will naturally go >0 because otherwise the farmer would just farm all land and $L_{\text{solar}}$ is irrelevant.) Stage A outcome: The solution will give:
+$L_{\text{solar}}^* =$ maximum feasible lease rate,
+and associated $A_s^$ (how many acres of solar at that lease).
+Often, if solar is highly profitable, $L_{\text{solar}}^$ might hit the upper bound $L_{\max}$. If solar is marginal, $L_{\text{solar}}^*$ might be much lower or even hit $L_{\min}$ if NPV constraint isn’t the active one (but typically, if we’re maximizing $L$, the NPV or some other limit will bind, not the min).
+It’s possible that the farmland preservation constraints (like 51% ag use) force a limit on $A_s$ which in turn limits how high $L$ can go (because if $A_s$ is smaller, developer’s NPV might be actually smaller scale – although interestingly, a smaller project could have higher $L$ since less capacity might just meet NPV=0 at a higher rent per acre). The interplay is complex, but the solver will find the optimum combination of $A_s$ and $L_{\text{solar}}$ within all constraints.
+6.2 Land-allocation competition objective (Stage B)
+In Stage B, we fix $L_{\text{solar}} = L_{\text{solar}}^*$ (the optimal lease from Stage A), and re-optimize to allocate land between solar and crops to maximize the landowner’s benefit (or overall system benefit). Objective (Stage B): We choose an objective representing the “competition” for land between uses. A reasonable choice is to maximize the farmer’s Net Present Value (or net benefit), since the developer’s profit at this point is essentially zero by design (they’re at break-even paying $L_{\text{solar}}^*$). Maximizing farmer NPV will effectively maximize total welfare in this setup, because any additional solar beyond the developer’s break-even benefits the farmer without hurting the developer (it would actually give the developer positive NPV if we didn’t constrain them, but we already fixed $L$ at break-even level; if we allow more $A_s$, the developer’s NPV would go >0 which is fine as long as the constraint is ≥0, not =0). For simplicity, we can think of it as: each acre can either be used for crops or for solar.
+If used for solar, the farmer gets $L_{\text{solar}}^*$ per year (and loses whatever crop profit that acre would have provided).
+If used for crops, the farmer gets the crop profit (and no lease).
+We want to allocate acres to whichever gives higher present value, up to the limits required by policy (like must keep 51% in ag, etc.). So our Stage B objective could be linear:
+max
+⁡
+  
+(
+A
+s
+⋅
+Π
+lease
++
+∑
+j
+=
+1
+J
+A
+c
+,
+j
+⋅
+Π
+crop
+,
+j
+)
+,
+max(A 
+s
+​
+ ⋅Π 
+lease
+​
+ + 
+j=1
+∑
+J
+​
+ A 
+c,j
+​
+ ⋅Π 
+crop,j
+​
+ ),
+where:
+$\Pi_{\text{lease}}$ = present value (NPV) per acre of solar to the farmer = $L_{\text{solar}}^$ annuity PV. Specifically, $\Pi_{\text{lease}} = L_{\text{solar}}^ \sum_{t=1}^T \text{DF}_t$ (if lease starts at t=1 and ends at T). We can calculate that constant and use it as coefficient for $A_s$.
+$\Pi_{\text{crop},j}$ = present value per acre of crop $j$ = NPV of growing crop $j$ on 1 acre for T years (including the PA 116 tax credits if applicable and assuming the land remains in ag forever or at least through T? Actually, we might consider just project period T, after which presumably both scenarios could continue in ag or solar again – but let’s confine analysis to T). This would be $\sum_{t=1}^T [(Y_{j,t} P_{j,t} - C^{\text{op}}{\text{crop},j}) \text{DF}t] + (\text{land residual value if any})$. If we assume land value is same either way at end, we don’t include residual difference. PA 116 gives tax credits each year if land is in ag and not deferred; if our project defers them for the solar portion, then in crop scenario those credits are received. However, since in Stage B we’re presumably deciding how much land to keep in ag to keep credits, we might incorporate that credits effectively increase $\Pi{\text{crop}}$. To avoid complexity, we can exclude the tax credit from $\Pi{\text{crop}}$ and instead ensure the constraint about deferment is satisfied by keeping required acres in ag. The farmer’s objective implicitly values staying above 51% ag because if they drop below, they’d violate their agreement (which we forbid via constraint rather than penalize in objective).*
+In simpler terms, if solar lease (per acre) PV is greater than crop NPV per acre, the farmer would want as many solar acres as allowed; if crop is more valuable, they’d prefer crops. Typically, solar lease tends to outweigh net crop profit per acre by a lot (e.g. $800/acre-year lease vs maybe $200/acre-year net profit from corn/soy), so likely $A_s$ will be pushed to the maximum allowed by the 51% rule and any other constraints. Thus, Stage B will allocate:
+$A_s^*$ (possibly different from Stage A’s $A_s$, which was the size that made developer break-even at max $L$ – developer could still be okay doing a bit more area since any extra gives them positive NPV at same lease, but they wouldn’t object if allowed).
+$A_{c,j}^*$ for each crop.
+All constraints from Section 7 still apply in Stage B.
+The developer NPV constraint is no longer needed because we already fixed $L$ from that solution (and any increase in $A_s$ now would only increase developer NPV, so they remain ≥0). We effectively satisfy it by construction, so we can drop it in Stage B.
+But we must keep the farmland-preservation constraints, land limit, etc., as those guide the allocation.
+In particular, the 51% ag use constraint will likely bind: it says at most 49% of land can go to solar. So we expect $A_s$ to hit that limit (if solar lease is more profitable than crops). If crop profit per acre was very high (maybe specialty crops, etc.), the model might not even use all allowed solar acreage, but that’s unlikely for standard commodity crops.
+We can also consider alternative objectives:
+We could maximize total combined NPV of farmer+developer. But since developer NPV is pegged at ~0 (at break-even), maximizing combined NPV is essentially maximizing farmer NPV plus a constant (the developer stays at 0, or if $A_s$ increased, developer NPV would go positive, contributing to combined – but if we allow that, the combined optimum might use 100% for solar because now even developer gains; however, the developer NPV constraint is ≥0 not exactly 0, so yes, combined NPV would increase if we enlarge $A_s$ beyond 51% constraint until some other limit. But 51% will stop it anyway).
+So maximizing farmer NPV or combined NPV yields the same land allocation since the binding constraint will be farmland requirement, not the objective trade-off. If there were no 51% rule, combined NPV would just maximize $A_s$ until maybe land or budget runs out, giving developer >0 NPV which is fine because we only constrained ≥0. But farmland rule or others might then be the only thing preventing all land to solar. We’ll see that in sensitivity possibly.
+So, Stage B outcome:
+Optimal $A_s^*$ (which likely will be $0.49 A_{\text{tot}}$ if 51% rule active and solar lease is lucrative, or possibly $A_{\text{tot}}$ if the rule didn’t exist or is less stringent under some scenario).
+Breakdown of crop acres $A_{c,j}^*$. Possibly, if one crop is more profitable than another, the model might allocate all $A_c$ to the most profitable crop ($\Pi_{\text{crop},j}$ highest). If there’s a rotation or requirement to grow multiple crops, we haven’t enforced that except through possibly the gross income rule (which just says total income must exceed threshold, which likely it will if any decent cropping is done on 51% land). We could include optional constraints like at least some of each crop if diversification is needed, but not required by the prompt. So the model might choose the best crop and allocate all crop land to it. We can restrict if needed (e.g., maybe corn and soy rotation – but for optimization we might just treat them generically if they have similar economics).
+7. Constraint construction (shared-resource + permitting + grid + geometry + subsidy + farmland-preservation + “right land”)
+Now we list all the constraints explicitly:
+7.1 Land availability constraint (shared land resource)
+A
+s
++
+∑
+j
+=
+1
+J
+A
+c
+,
+j
+  
+≤
+  
+A
+tot
+.
+A 
+s
+​
+ + 
+j=1
+∑
+J
+​
+ A 
+c,j
+​
+ ≤A 
+tot
+​
+ .
+(All solar acres plus all crop acres cannot exceed total available acres. In an optimal solution we expect this to hold as equality if all land is used productively, but it could be $<$ if, say, some land can’t be used due to constraints like prime cap or if additional land beyond 51% for crops has no value – which is unlikely; usually you’d at least plant something.) If needed, we could allow leaving some land unused (fallow) by not forcing equality. But any unused land could be conceptually counted as part of $A_c$ (just a crop that yields nothing, but then that wouldn’t help meet income requirement unless it’s CRP or something generating some income). For simplicity, we allow ≤, meaning land can go unused if not optimal to use it (but typically either farming or solar would be done on all feasible land).
+7.2 Non-negativity
+A
+s
+≥
+0
+,
+A
+c
+,
+j
+≥
+0
+∀
+j
+.
+A 
+s
+​
+ ≥0,A 
+c,j
+​
+ ≥0∀j.
+Trivial but must be stated. (We already declared variables ≥0, so this is just reiteration.) We also have $P_{\text{PV}}\ge 0$, $h_{\text{PV}}\ge 0$, etc., by variable definitions. If we had any variables that could be negative (like maybe NPV itself sometimes treated as variable in linearization – but here we don’t have to do that, we directly constrain the sum for NPV).
+7.3 Full-Dev area-to-capacity coupling
+As derived in Section 2: For a chosen configuration:
+P
+PV
+=
+A
+s
+α
+ac/MW
+.
+P 
+PV
+​
+ = 
+α 
+ac/MW
+​
+ 
+A 
+s
+​
+ 
+​
+ .
+(Where $\alpha_{\text{ac/MW}}$ corresponds to the config in use, e.g. 6.0 ac/MW_ac.) If using MILP config selection:
+A
+s
+=
+∑
+k
+A
+s
+,
+k
+,
+A
+s
+,
+k
+≤
+A
+tot
+ 
+y
+k
+∀
+k
+,
+A 
+s
+​
+ = 
+k
+∑
+​
+ A 
+s,k
+​
+ ,A 
+s,k
+​
+ ≤A 
+tot
+​
+ y 
+k
+​
+ ∀k,
+∑
+k
+y
+k
+=
+1
+,
+P
+PV
+=
+∑
+k
+A
+s
+,
+k
+α
+k
+.
+k
+∑
+​
+ y 
+k
+​
+ =1,P 
+PV
+​
+ = 
+k
+∑
+​
+  
+α 
+k
+​
+ 
+A 
+s,k
+​
+ 
+​
+ .
+(These ensure one configuration is active and ties capacity accordingly. In either case, it prevents solutions where, say, $A_s$ and $P_{\text{PV}}$ vary independently. This is crucial for realism: you can’t claim a huge $P_{\text{PV}}$ output from a small $A_s$ or vice versa.)
+7.4 Shared capital budget constraint
+(If we have a capital budget limit for upfront investment – say the farmer or developer has only so much capital available – we enforce it here. If no explicit cap, this constraint can be omitted or set very large.) Let:
+$C^{\text{cap}}_{\text{solar}}$ = upfront capital required per acre of solar = $(C^{\text{const}} + C^{\text{siteprep}} + C^{\text{grade}} + C^{\text{bond}}) +$ interconnection portion per acre. We can calculate it from inputs (it’s basically $\text{CAPEX}^{\text{solar}}0 / A_s$ if linear). For a linear model, we might treat $C^{\text{cap}}{\text{solar}}$ as a constant coefficient approximated from a base scenario (though part of it depends on $A_s$ if $\alpha^{\text{inter}}$ is applied – but if $\alpha^{\text{inter}}$ is constant fraction, then it’s also proportional to $A_s$ so can be lumped in).
+$C^{\text{cap}}_{\text{crop},j}$ = upfront capital per acre of crop $j$. If any (for row crops, might be near 0 if assuming equipment is owned regardless of acreage; for specialty crops, could be significant e.g. planting fruit trees). We include if relevant. Let’s assume it’s negligible or already counted in annual costs, unless we consider something like needing irrigation installation at $X/acre if converting land to certain crop.
+Then the budget cap is:
+C
+solar
+cap
+⋅
+A
+s
+  
++
+  
+∑
+j
+=
+1
+J
+C
+crop
+,
+j
+cap
+⋅
+A
+c
+,
+j
+  
+≤
+  
+BudgetCap
+.
+C 
+solar
+cap
+​
+ ⋅A 
+s
+​
+ + 
+j=1
+∑
+J
+​
+ C 
+crop,j
+cap
+​
+ ⋅A 
+c,j
+​
+ ≤BudgetCap.
+(This ensures the chosen mix of solar and crops doesn’t require more initial cash than available. For example, if BudgetCap = $5 million, and solar costs $250k/acre, then at most 20 acres of solar can be built unless more budget is allowed. If BudgetCap is very high or not a binding concern, this constraint won’t matter. In many cases, the developer’s budget could be large (financing available), so this might not bind. But a farmer’s self-funded scenario might have a budget limiting solar size – although then a developer wouldn’t come into play. Anyway, we include it generally.) If the capital comes from project finance rather than a hard cap, this constraint might not be needed (the project could scale if it’s NPV positive and just take a bigger loan). So using it depends on the context. We keep it as a shared resource in case, say, a farm has a limited capital they’re willing to invest in on-farm improvements (like irrigation) which could conflict with also investing in a solar venture if they were co-investing. In our lease case, the developer handles solar CAPEX, so the farmer’s capital isn’t used for solar at all. If we’re the farmer optimizing, maybe BudgetCap only applies to their own farm investments (which are low here). The developer presumably has enough access to capital if NPV is there, so maybe we set BudgetCap large or don’t include it for developer. For completeness, we keep it but assume it’s non-binding (or not tight) unless stated otherwise.
+7.5 Shared annual operating budget cap
+If there’s a limit on how much can be spent on operations each year (either by the farmer’s management capacity or some other resource constraint): Define:
+$C^{\text{op}}_{\text{solar}}$ = operating cost per solar acre per year (excluding lease). This would be $C^{\text{O&M}} + C^{\text{veg}}$ (and if insurance is per acre constant, include that too). We could also incorporate any property taxes on solar in this if relevant. Let’s treat it as a known number, e.g. $2,300/acre-year for solar O&M+veg (just an example).
+$C^{\text{op}}_{\text{crop},j}$ = operating cost per crop acre per year (seeds, fertilizer, labor, etc.). E.g. for corn, could be $600/acre-year, for soy $400, etc. Or one could use net margins instead of breaking out costs, but since we separated revenue and cost, use cost here.
+Then ensure:
+C
+solar
+op
+⋅
+A
+s
+  
++
+  
+∑
+j
+=
+1
+J
+C
+crop
+,
+j
+op
+⋅
+A
+c
+,
+j
+  
+≤
+  
+OpCap
+.
+C 
+solar
+op
+​
+ ⋅A 
+s
+​
+ + 
+j=1
+∑
+J
+​
+ C 
+crop,j
+op
+​
+ ⋅A 
+c,j
+​
+ ≤OpCap.
+(This means the total annual operating expenditure cannot exceed the available working capital or budget. If the farmer is the one paying crop input costs and maybe some solar-related costs like land maintenance, this could be their constraint. If the developer is paying solar O&M, the farmer’s OpCap is only relevant for crops; the developer’s OpCap (if they had a limit on annual O&M budget) could also be considered but typically O&M is proportional and funded through revenue. This constraint is more relevant if a single entity had to cover all costs, or if there’s a labor/cashflow limit on the farm. We include it generally; it can be relaxed if not needed.) If needed, this could be year-specific (different OpCap each year, e.g. maybe tighter in early years vs later). To keep linear, we might just use a representative worst-case year or an average. Usually, you’d enforce the highest year cost <= OpCap, which typically is the same each year for O&M if constant. For crops, costs can vary by rotation; we could base it on annual average or the peak in rotation cycle. We’ll assume if it binds, it’s using an average or first-year costs.
+7.6 Shared labor/management time cap
+If the combined solar + farming activities require management time or labor, ensure it’s within what’s available:
+$\ell_{\text{solar}}$ = labor hours per acre of solar per year (for vegetation management oversight, inverter checks, etc.). Might be low, e.g. 2 hours/acre-year if contractor does O&M, or more if the farmer themselves do vegetation work.
+$\ell_{\text{crop},j}$ = labor hours per acre of crop $j$ per year (varies by crop; e.g. vegetables very high, corn/soy moderate with machinery, etc.).
+$L_{\max}$ = total labor hours available per year (farmer + staff). E.g. one full-time person ~2000 hours.
+Constraint:
+ℓ
+solar
+⋅
+A
+s
+  
++
+  
+∑
+j
+=
+1
+J
+ℓ
+crop
+,
+j
+⋅
+A
+c
+,
+j
+  
+≤
+  
+L
+max
+⁡
+.
+ℓ 
+solar
+​
+ ⋅A 
+s
+​
+ + 
+j=1
+∑
+J
+​
+ ℓ 
+crop,j
+​
+ ⋅A 
+c,j
+​
+ ≤L 
+max
+​
+ .
+(This ensures they’re not planning more work than they can handle. If a developer handles all solar O&M via external contractors, $\ell_{\text{solar}}$ for the farmer might be near 0 – just coordination time. If the farmer participates in maintenance (e.g., grazing sheep under panels or mowing), then it adds. We should set values accordingly. If not a concern, $L_{\max}$ can be large or constraint dropped.)
+7.7 Farmland-preservation / PA 116 “remain farmland” constraints
+For land enrolled in PA 116 (or to maintain agricultural use classification): If $A_{\text{tot}} \ge 40$ acres:
+Must maintain ≥51% in agricultural use:
+A
+ag
+  
+≥
+  
+0.51
+ 
+A
+tot
+.
+A 
+ag
+​
+ ≥0.51A 
+tot
+​
+ .
+If $5 \le A_{\text{tot}} < 40$ acres:
+Must maintain ≥51% in ag and meet gross income requirement:
+A
+ag
+  
+≥
+  
+0.51
+ 
+A
+tot
+,
+A 
+ag
+​
+ ≥0.51A 
+tot
+​
+ ,
+GrossAgIncome
+  
+≥
+  
+200
+×
+A
+tillable,cleared
+.
+GrossAgIncome≥200×A 
+tillable,cleared
+​
+ .
+(In words: over half the land must stay in agriculture, and if the parcel is small (<40 acres), it also needs to generate at least $200 per tillable acre annually from agriculture. This second condition ensures the land isn't just token farm use – it has real production.) For our model:
+$A_{\text{ag}}$ = acres in ag use (which in our scenario = acres in crops, since we assume no other ag use like CRP is ongoing concurrently with solar).
+$A_{\text{tillable,cleared}}$ = total tillable acres (basically $A_{\text{tot}}$ minus any non-farmable parts, but if the farm was fully tillable except the part used by solar, then effectively $A_{\text{tillable,cleared}} = A_{\text{tot}}$ in initial state – if they put solar on it, the solar part is no longer in ag, but when computing the income requirement, it's usually based on total originally tillable acres I think. However, that rule likely intends $A_{\text{tillable,cleared}}$ still count the whole parcel; thus even if half is solar, the income needs to be $200 \times$ (all tillable acres). This becomes hard if solar takes much land – presumably why you can’t drop below 51% ag or you’d fail income test anyway if half land yields nothing. But we will treat it as needing to satisfy with the remaining ag land.)
+We ensure these via constraints. Likely in our solution, $A_{\text{ag}} = A_c$ (assuming only cropping counts as ag use here, since solar with pollinator doesn’t count as ag production in PA 116 terms). So effectively it says $A_c \ge 0.51 A_{\text{tot}}$. That will cap $A_s \le 0.49 A_{\text{tot}}$. The income constraint: $\text{GrossAgIncome} \ge 200 \cdot A_{\text{tillable,cleared}}$. If $A_c$ is 51% of $A_{\text{tot}}$, to satisfy this, each cropped acre must on average produce $200. If our crop is corn/soy, gross income might be $600/acre (200 bu * $3 for corn = $600 gross, for example) so it would satisfy easily. If the farmer left the 51% in fallow or just grass hay making <$200, then they’d violate the rule. So the model should also ensure the crops chosen yield enough gross income. With typical yields, it likely will. If it was tight, the model might choose a higher-grossing crop or more intensive use on those acres to satisfy it. We have not given the model a choice that affects yield much except crop type. But if one crop yields low value (<$200/acre), that constraint effectively forces some combination to push it above $200*acres. We will see if that influences crop mix (e.g. it might prefer corn over just set-aside grass if needed to hit income requirement). We also have the set definition:
+AgUse
+∈
+{
+production of plants/animals, federal set-aside, CRP
+}
+.
+AgUse∈{production of plants/animals, federal set-aside, CRP}.
+This is more of an advisory note than a solvable constraint; basically we are clarifying what counts in $A_{\text{ag}}$. We assume $A_c$ (crops) qualifies. If some portion was CRP, we could treat it as a “crop type” with $Y=0$ yield but it pays some government payment – but we won’t detail that unless needed.
+7.8 PA 116 solar-permitted-use conditions constraints
+To allow solar while keeping land in PA 116, all of the following must hold (so we include them as hard constraints, essentially forcing those binary flags =1 and certain values):
+Pollinator habitat requirement:
+Score
+poll
+  
+≥
+  
+76.
+Score 
+poll
+​
+ ≥76.
+This ensures the site’s planned vegetation under and around panels scores sufficiently high on the pollinator-friendly scale. (We treat this as a given requirement – essentially the developer must design seed mixes and management to meet this. In an optimization, if there was a cost vs score trade-off, one might incorporate that, but here we just require it outright. We assume it can be met at some reasonable cost included in $C^{\text{veg}}$ perhaps.)
+Also enforce
+y
+NRCS327
+=
+1
+,
+y 
+NRCS327
+​
+ =1,
+meaning the specific conservation practice standard #327 (pollinator habitat) is implemented as part of the project. (This is effectively the same requirement as Score>=76 but we include it to be explicit that practice is adopted.)
+Decommissioning plan and financial assurance:
+B
+decom
+  
+≥
+  
+C
+^
+decom
+(
+PE estimate
+)
+.
+B 
+decom
+​
+ ≥ 
+C
+  
+decom
+​
+ (PE estimate).
+i.e. the bond or letter of credit must be at least equal to the engineer’s estimated decom cost. We included $C^{\text{bond}}$ as ≥ $10k/acre in CAPEX, presumably that times acres should cover it, but to be safe we also require this explicitly. If $\widehat{C}{\text{decom}}$ came out higher than what $C^{\text{bond}}$ assumed, the project must increase the bond. We assume $B{\text{decom}} = A_s \cdot C^{\text{bond}}$ in our cost model, and $\widehat{C}_{\text{decom}} = A_s \cdot C^{\text{decom}}$ (if engineer uses similar per kW estimate). Then this constraint essentially requires $C^{\text{bond}} \ge C^{\text{decom}}$ (per acre). We set $C^{\text{bond}}$ min $10k which is likely less than $C^{\text{decom}}$ (which was $72k in our calc). So in reality the bond might need to equal decom cost; Michigan might require bond covering full cost minus salvage. For our model, we can assume the developer will post the required bond – we’ve accounted for decom cost at end and maybe not fully accounted for salvage offset – but anyway, we ensure the requirement is met.
+Also:
+y
+decom-plan
+=
+1
+,
+y 
+decom-plan
+​
+ =1,
+meaning a formal decommissioning plan is in place/approved. (We already assumed we’d do that anyway, so it’s just confirming compliance.)
+Return-to-ag commitment:
+y
+return-to-ag-first-growing-season
+=
+1.
+y 
+return-to-ag-first-growing-season
+​
+ =1.
+The landowner must agree (and plan) to return the land to agricultural production in the first growing season after solar removal. This is a PA 116 condition. We include it as a binary constraint. It doesn’t have a numerical effect on our model (it’s a promise about future behavior), but it must be part of the agreement.
+Tax credit deferment enforcement: For all years $t$ that the solar is in place (the set $\mathcal{T}_{\text{defer}}$):
+PA116TaxCredit
+t
+=
+0.
+PA116TaxCredit 
+t
+​
+ =0.
+This is not so much a constraint to solve the optimization as a condition to apply when calculating the farmer’s cash flows. We will ensure in our NPV calculations for the farmer that during those years we do not count the tax credit they normally receive for keeping land in ag. If the project covers only a portion of land, technically they might get a prorated credit for the portion still in ag – but I believe Michigan’s rule says if any of the enrolled land is used for solar, the entire contract’s credits are deferred. (We should confirm: actually, they amend the agreement to temporarily remove those acres? Possibly they only lose credit on those acres. But to be safe, assume whole contract’s credit is deferred to avoid complexity.)
+We implement it as: if any solar, no credit on that parcel. The constraint above just zeros it out in those years. (No optimization needed here, just accounting.)
+PA 116 agreement adjustments:
+y
+PA116-agreement-amended
+=
+1
+,
+y
+PA116-term-extended
+=
+1.
+y 
+PA116-agreement-amended
+​
+ =1,y 
+PA116-term-extended
+​
+ =1.
+The landowner must officially amend their PA 116 agreement to allow the solar use, and extend the agreement term (usually extend by the number of years the land is out of production, e.g. add 20 years). We enforce these as 1 (which we were going to anyway). There’s no cost directly modeled for this (though in reality, if you break PA 116 without doing these, you’d owe back taxes; by amending, you avoid penalties but extend commitment). We assume the amendment and extension happen, enabling the project without penalty.
+(All these 7.8 constraints essentially ensure the project is structured to fully comply with farmland preservation program requirements, which is necessary if the landowner wants to keep their tax benefits and avoid contract termination. The model will not consider non-compliant solutions, so we just hard-code these as done.)
+7.9 Zoning / ordinance / moratorium constraints
+Ensure compliance with local rules:
+Zoning approval:
+Z
+=
+1.
+Z=1.
+We require the design meets zoning (we wouldn’t proceed otherwise). If $Z$ were 0, the solution for $A_s$ would have to be 0 (because either you redesign to meet zoning or you can’t do solar). We don’t allow $Z=0$ solutions here; instead, we incorporate zoning limits below so that any solution that satisfies them can be considered $Z=1$. Essentially, $Z$ is an outcome of meeting all these sub-constraints (glare, setbacks, etc.). We set it to 1 to indicate we will meet them.
+Zoning solar acreage cap:
+A
+s
+  
+≤
+  
+A
+zoning-allow
+.
+A 
+s
+​
+ ≤A 
+zoning-allow
+​
+ .
+If the local ordinance caps the size (e.g. “solar farms cannot exceed 20 acres in this township” or “no more than 2% of township land per section” – but we have a specific site so likely a fixed acre limit). We apply it straightforwardly. If no such cap, $A_{\text{zoning-allow}} = A_{\text{tot}}$ or a very large number, so it won’t bind.
+Setback-adjusted usable area:
+A
+s
+  
+≤
+  
+(
+1
+−
+δ
+setback
+)
+ 
+A
+tot
+.
+A 
+s
+​
+ ≤(1−δ 
+setback
+​
+ )A 
+tot
+​
+ .
+This accounts for the fraction of land lost to setbacks where panels can’t be placed. For example, if $\delta_{\text{setback}}=0.10$, and $A_{\text{tot}}=100$ acres, then at most 90 acres can have panels. This is effectively a more general way to incorporate setbacks without modeling geometry in detail.
+(If some setbacks could still be used for crops, $A_c$ could technically farm there – we haven’t prevented that explicitly. This constraint just limits solar area. In reality, you could have $A_s$=90 and $A_c$ could be 100 if they farm the setbacks too. Our land constraint 7.1 covers total though. If farming in setbacks is allowed, the land constraint would become $A_s + A_c \le A_{\text{tot}} + A_{\text{setback acres}}$ with that double counting – complicated. Usually, setbacks become grass or pollinator habitat, not crops, due to fencing. We’ll assume they remain unused or just grass strips.)
+Height limit:
+h
+PV
+  
+≤
+  
+h
+max
+⁡
+.
+h 
+PV
+​
+ ≤h 
+max
+​
+ .
+If $h_{\max}=20$ ft and the project wants to use e.g. 15 ft racks for tractors, that’s fine. If it wanted 25 ft (maybe to allow full size combines), it would violate unless $h_{\max}$ was changed or a variance given. We will stick to $h_{\text{PV}}$ within limit. (We could also in sensitivity see if raising $h_{\max}$ yields any benefit – likely not in NPV directly unless it improved yields which we didn’t model.)
+Moratorium constraint:
+A
+s
+  
+≤
+  
+(
+1
+−
+m
+)
+ 
+A
+tot
+.
+A 
+s
+​
+ ≤(1−m)A 
+tot
+​
+ .
+If $m=1$ (moratorium in effect), this becomes $A_s \le 0$, forcing $A_s=0$ (no solar development can happen now). If $m=0$, it’s $A_s \le A_{\text{tot}}$ which we already have from land constraint, so effectively it’s inactive. We include it to reflect that if a moratorium is announced, the solution should default to $A_s=0$ (i.e. “do nothing for now”). Our scenario likely assumes $m=0$.
+7.10 Easement / covenant exclusion
+A
+s
+  
+≤
+  
+A
+tot
+−
+A
+easement
+.
+A 
+s
+​
+ ≤A 
+tot
+​
+ −A 
+easement
+​
+ .
+If e.g. 5 acres of the property are under a utility easement where we cannot put solar (but maybe can still crop or must leave untouched), then if $A_{\text{tot}}=100$ and $A_{\text{easement}}=5$, this ensures $A_s \le 95$. Essentially, only 95 acres are actually usable for solar infrastructure. If cropping is allowed in easement areas (often yes, e.g. power lines overhead – you can farm under them, just not build structures), then those acres could still count in $A_c$. Our constraint doesn’t stop $A_c$ from using those acres. We subtract them only for $A_s$. If needed, we could also restrict $A_c$ if easement prohibits farming (like a conservation easement might disallow disturbance – in that case $A_{\text{easement}}$ is effectively not usable for anything and we should subtract it from $A_{\text{tot}}$ in land availability too, or include a separate $A_c$ constraint). But typically, drainage easements and utility ROW you can still crop. So we only restrict solar.
+7.11 Wetlands / permit trigger
+W
+fill
+  
+≤
+  
+W
+permit
+.
+W 
+fill
+​
+ ≤W 
+permit
+​
+ .
+If $W_{\text{permit}}=0$ (no wetland fill without permit that we want to avoid), then $W_{\text{fill}}=0$: the project cannot fill any wetlands, meaning solar must avoid them or only use pile-driven posts that don’t “fill” (but usually any grading or road in wetland counts as fill). We could interpret it as avoid entirely. If $W_{\text{permit}}$ is e.g. 0.1 acre (some de minimis allowance), we could allow a tiny impact but not more. In practice, $W_{\text{fill}}$ would be a function of $A_s$ and site selection – we might have data like “of the 100 acres, 2 are wetland; if we use those 2 for solar, that’s 2 acres fill.” Without spatial model, we’d likely just say if $A_s$ includes that area or not. We might treat it as: if $A_s$ tries to exceed $A_{\text{tot}} -$ (wetland area), then it must be filling wetland. But to keep it simple, we might set $W_{\text{fill}} = 0$ (the solution should not count wetlands as usable). Alternatively, we can subtract wetland area like we did easements:
+If e.g. 3 acres are wetland, we could effectively treat $A_{\text{tot,usable}} = A_{\text{tot}} - 3$ for solar, unless the design chooses to fill them (which we discourage by this constraint unless absolutely necessary and allowed via permit with cost).
+We didn’t explicitly subtract wetlands earlier, but we can assume $A_{\text{tot}}$ given is already net of large wetlands, or consider them as part of $A_{\text{easement}}$ type exclusion. To be safe, we keep this permit trigger: effectively the model will choose $W_{\text{fill}}=0$ if it can (since filling yields no benefit but potentially a cost or violation). So it’ll avoid using wetland area.
+7.12 Permit compliance binaries
+Ensure the project design meets common permit conditions:
+y
+glare
+=
+1
+,
+y
+decom-plan
+=
+1.
+y 
+glare
+​
+ =1,y 
+decom-plan
+​
+ =1.
+We already had $y_{\text{decom-plan}}$ in PA 116 context, but even if not PA 116, most counties require a decom plan, so it’s anyway needed. $y_{\text{glare}}=1$ means a glare analysis was done and any potential glare (to roadways or homes) is mitigated (e.g., through using anti-reflective panels and vegetative buffers). Many ordinances explicitly require “no glare” certification. We treat it as a given requirement – any design we consider must include measures to address glare. These being =1 doesn’t impact acres or finances (except minor costs included in development overhead perhaps), but ensures feasibility.
+7.13 Interconnection capacity and queue timing
+P
+PV
+  
+≤
+  
+P
+interconnect-available
+.
+P 
+PV
+​
+ ≤P 
+interconnect-available
+​
+ .
+If the utility says “you can connect up to 5 MW without substation upgrade,” and $P_{\text{interconnect-available}}=5$ MW, then this constraint ensures we don’t plan a project larger than 5 MW (unless we also plan to pay for upgrades which would be covered under $\alpha^{\text{inter}}$ cost). Actually, if we have $\alpha^{\text{inter}}$ and a cost cap for upgrades (7.14), the model could choose to exceed $P_{\text{interconnect-available}}$ if economically justified by paying upgrades. If we want a hard cap, we set $P_{\text{interconnect-available}}$ as an absolute max beyond which connection is impossible. Alternatively, treat $P_{\text{interconnect-available}}$ as the capacity with zero upgrade cost, and allow going beyond with upgrades (but then 7.14 would limit how far beyond based on cost). We might interpret it as the max after which maybe no connection is available at all (like feeder thermal limit). But since we introduced an upgrade cost function and cap, perhaps:
+We could remove this constraint if upgrades can theoretically expand capacity, and only use cost. But real world often has hard limits (like line won’t handle >X even with upgrades unless you reconductor entire miles which might be outside project scope).
+We keep it as a likely limit of practical size for that POI.
+Next, queue timing:
+COD
+  
+≥
+  
+COD
+min
+⁡
+.
+COD≥COD 
+min
+​
+ .
+If $\text{COD}_{\min}=2028$, and if our model timeline starts at 2025 ($t=0$ meaning 2025), then $\text{COD}$ would be year 3 at earliest. This is to say you can’t get revenue until then. In the cash flows, effectively $\text{Rev}^{\text{solar}}_t=0$ for $t$ before COD (and OPEX also 0 because not operating). We can implement that by starting the sum in NPV from $t=\text{COD}$ or just ensure no generation until that year. Since we didn’t explicitly model year-by-year in the formulation (we put general formulas), we conceptually incorporate it by adjusting timeline. But for constraint, we include it to avoid a scenario trying to claim revenue earlier. In optimization terms, it doesn’t affect objective or anything unless we allowed when to start construction as a decision (which we aren’t – we assume now). We can just set $\text{COD} = \text{COD}_{\min}$ basically, since no reason to delay beyond required. However, if we were optimizing when to build, we might minimize present cost by delaying start a bit if power prices rise or to align with better conditions. But likely not in this scenario. We’ll just enforce not earlier than allowed.
+7.14 Interconnection upgrade cost cap
+C
+upgrade
+(
+P
+PV
+)
+  
+≤
+  
+C
+upgrade,max
+.
+C 
+upgrade
+​
+ (P 
+PV
+​
+ )≤C 
+upgrade,max
+​
+ .
+$C_{\text{upgrade,max}}$ is how much the project is willing or able to spend on grid upgrades. If, for example, the company has a policy not to exceed $1 million in upgrades, and if connecting 10 MW would cost $2M upgrades, that’s not allowed. We need an expression for $C_{\text{upgrade}}(P_{\text{PV}})$. Possibly:
+$C_{\text{upgrade}}(P_{\text{PV}}) = \alpha^{\text{inter}} \cdot (P_{\text{PV}} \text{(MW)} \times \text{cost per MW})$. If we had per-acre cost earlier, let's derive: If $C^{\text{const}}$/acre corresponded to some base cost per MW, $\alpha^{\text{inter}}$ fraction of that gave upgrade cost included in CAPEX. But for cap, maybe easier: if $\alpha^{\text{inter}}=0.3$ and base PV cost is $1.5M/MW, then per MW upgrade cost ~$0.45M. For $P_{\text{PV}}$ MW, upgrade cost ~$0.45M/MW * P_{\text{PV}}$.
+We could then say
+0.45
+M$
+⋅
+P
+PV
+  
+≤
+  
+C
+upgrade,max
+.
+0.45M$⋅P 
+PV
+​
+ ≤C 
+upgrade,max
+​
+ .
+Or general
+α
+inter
+⋅
+(
+A
+s
+⋅
+C
+const
+)
+  
+≤
+  
+C
+upgrade,max
+,
+α 
+inter
+ ⋅(A 
+s
+​
+ ⋅C 
+const
+ )≤C 
+upgrade,max
+​
+ ,
+since $A_s \cdot C^{\text{const}}$ is basically PV equipment cost, times $\alpha^{\text{inter}}$ yields upgrade cost. That’s linear: $A_s \le \frac{C_{\text{upgrade,max}}}{\alpha^{\text{inter}} C^{\text{const}}}$.
+But that might not precisely match actual upgrade cost scaling if it’s stepped.
+For model’s sake, we treat $C_{\text{upgrade,max}}$ as given (maybe derived from e.g. $X per MW times threshold we accept). If the model tries to exceed that, this constraint stops it. In combination, this and 7.13 means:
+If $P_{\text{PV}}$ is below available capacity, likely no upgrades needed, constraint fine.
+If $P_{\text{PV}}$ above available, $C_{\text{upgrade}}$ becomes significant, but we allow it if under cap. If above cap, not allowed.
+So effectively, it allows $P_{\text{PV}}$ to exceed $P_{\text{interconnect-available}}$ up to some point that hitting upgrade cost cap might stop it. Alternatively, one could implement a piecewise: no cost up to available, then cost after. But linear model can’t do piecewise easily without additional variables. We approximated by always charging fraction $\alpha^{\text{inter}}$ for all capacity, which over-charges upgrade cost if under threshold, and under-charges if above threshold’s steep jump. Not perfect, but hopefully within realistic planning margin.
+7.15 Distribution feeder penetration and power factor
+PV_penetration
+  
+≤
+  
+PV_penetration
+max
+⁡
+.
+PV_penetration≤PV_penetration 
+max
+​
+ .
+If $\text{PV_penetration}{\max} = 0.34$ (34% of feeder peak, per NREL studies), and if feeder peak is known, we translate this to $P{\text{PV}} \le 0.34 \times P_{\text{peak}}$. If $P_{\text{peak}}$ not given explicitly, we might combine this with $P_{\text{interconnect-available}}$ since that likely came from a similar consideration. If we have both, we ensure we respect the stricter one. It might be redundant if $P_{\text{interconnect-available}}$ was set based on penetration. But if $P_{\text{interconnect-available}}$ was defined by other constraints (like substation capacity), this feeder penetration could be separate (like you might not want to exceed 15% to maintain voltage without additional control even if physically the substation could handle it). We’ll include it. It’s linear if we treat $P_{\text{peak}}$ as constant: $\frac{P_{\text{PV}}}{P_{\text{peak}}} \le \text{PV_penetration}{\max}$, multiply both sides by $P{\text{peak}}$: $P_{\text{PV}} \le \text{PV_penetration}{\max} \cdot P{\text{peak}}$. That's a simple linear bound on $P_{\text{PV}}$. Power factor:
+pf
+  
+≥
+  
+pf
+min
+⁡
+.
+pf≥pf 
+min
+​
+ .
+Say $\text{pf}_{\min}=0.95$. If we allowed $\text{pf}$ to vary, the best for developer revenue is $\text{pf}=1$ (maximizes active power output). So the model would never choose lower pf unless forced. Therefore, we expect $\text{pf}$ to just be set at 0.95 if required, or at 1.0 if no requirement to go lower. We might simply set $\text{pf}=0.95$ as a given (to be safe with grid), meaning the inverters operate slightly in VAR-absorbing mode to help voltage. This reduces real power output a tiny bit (by 0.95 factor), but we could absorb that into $\phi^{\text{export}}$ or so if needed. For simplicity, we might not model the slight reduction in output from pf <1, since 0.95 pf allows ~3% more current headroom for VARs but still output ~99% real power possible. It’s a minor hit. So just ensure it's not less than 0.95. (It won’t want to anyway, no benefit to going lower in our objective.)
+7.16 Net-metering cap (conditional)
+If part of the project is net-metered with on-site load (like say the farm has a usage and can net-meter up to a certain size):
+P
+NM
+  
+≤
+  
+γ
+cap
+⋅
+P
+peak
+.
+P 
+NM
+​
+ ≤γ 
+cap
+​
+ ⋅P 
+peak
+​
+ .
+For example, if farm peak load is 100 kW and $\gamma_{\text{cap}}=1.0$ (100% of peak), then max net-metered portion is 100 kW. If the project is 1 MW, 100 kW could be net-metered, rest has to be sold via different arrangement (or simply all sold wholesale if net-metering not used). In our model, we didn’t allocate any $P_{\text{NM}}$ vs $P_{\text{wholesale}}$ explicitly. We could introduce $P_{\text{NM}}$ and $P_{\text{export}} = P_{\text{PV}} - P_{\text{NM}}$ if we wanted to consider a scenario like using some power on-site offset at retail rate (which could improve economics). The prompt’s mention of “retail reference vs sell price” suggests maybe originally considering net-metering benefits but decided not to count retail price as default. We likely will not delve into net-metering in this run (since a large agrivoltaic likely sells wholesale). So we can effectively set $P_{\text{NM}}=0$ or very small and ignore this constraint (or consider it satisfied). If we were doing a smaller installation just for farm, we’d use this. We keep it here but in our primary scenario it’s inactive.
+7.17 Drain tile protection
+D
+tile-damage
+  
+≤
+  
+D
+max
+⁡
+.
+D 
+tile-damage
+​
+ ≤D 
+max
+​
+ .
+If $D_{\max}=0$ (we cannot permanently damage any drain tiles), then $D_{\text{tile-damage}}$ must be 0. That implies the design must avoid severing tiles or must repair any cut tiles (so net damage 0). We treat it as we will design such that tiles are maintained (common approach: map tiles pre-construction, either avoid or reroute them). If some small damage is acceptable (maybe D_max is length that can be easily repaired later), anyway, we keep as general. This constraint is a bit abstract to incorporate linearly. If $D_{\text{tile-damage}} = k \cdot A_s$ (i.e. assume each acre of solar causes k feet of tile to break during construction that is not repaired), then $k A_s \le D_{\max}$. If $D_{\max}=0$, then $A_s$ must be 0 unless $k=0$. That would imply if any solar is built, some tile is broken. In reality, you could have $k \approx 50$ feet/acre broken; if $A_s=10$ acres, 500 ft broken, but maybe all repaired such that damage metric resets to 0 (if we count only unrepaired damage). So to allow solar without violation, they’d plan to fix all tile or remove tile where posts go and regrade slope. Given difficulty, we likely presume $D_{\text{tile-damage}}$ will be mitigated fully, so effectively $D_{\text{tile-damage}} = 0$ by planning or immediate repair. So project can proceed with no net loss of drainage function. We can satisfy this by making sure the developer allocates some cost for tile repair in site prep, which we might have lumped in or not. Let’s assume yes. So we’ll enforce if needed $D_{\text{tile-damage}}=0$ i.e. no lingering issue. If a solution tried to ignore tile issue, that wouldn’t show up in our NPV anyway. This is more a feasibility check: we must ensure to address it or farmer may not accept project for fear of ruining field drainage. We include it conceptually; it won’t affect our linear programming variables (we don’t have one for tile length or so). It’s a constraint that is either automatically satisfied by design (with mitigation) or if not, then solution should be disallowed. We assume it’s satisfied ($m$ of tile damage mitigated = 0 net).
+7.18 Agrivoltaic machinery access geometry
+Ensure minimum clearances:
+clearance
+  
+≥
+  
+clearance
+min
+⁡
+,
+row-spacing
+  
+≥
+  
+row-spacing
+min
+⁡
+.
+clearance≥clearance 
+min
+​
+ ,row-spacing≥row-spacing 
+min
+​
+ .
+E.g. clearance_min = 14 ft if we want a combine harvester to pass under (for corn). Or maybe 8 ft if just small tractor for vegetables. Let’s say this farm uses smaller equipment, clearance_min=8 ft. We could try both in sensitivity. Row-spacing_min might be, say, 20 ft (to allow enough sunlight and machinery between panel rows). If panels are single-axis trackers with 2-up portrait, row spacing might naturally be ~20 ft for 5.5 ac/MW at low ground cover ratio. Anyway, these constraints ensure the solar design doesn’t choke the farming operations. They don’t directly influence objective (unless we had cost or yield dependent on them), because any rational design will meet them to allow the “agrivoltaic” intent. Possibly making them larger (more clearance, wider spacing) could reduce $E_0$ (fewer panels per acre) or increase cost per MW (needing more land), but since we fixed $\alpha_{\text{ac/MW}}$ presumably with these in mind, we assume the chosen $\alpha$ already reflects a layout that meets minimums. If we had $\alpha$ as variable, clearance & spacing could tie to it (e.g., more spacing = higher $\alpha$). But we did not link them here. Thus we simply include them as design requirements to state that agrivoltaic conditions are met. (If one wanted to see effect, one could say: If clearance_min not met, maybe crop yield factor f_j becomes 0 (can’t farm) – but since we don’t partially allow that, better to just enforce it.)
+7.19 “Right land” siting constraints
+We gather constraints ensuring the project uses only “preferred” land categories:
+Farmland-only siting: Since we assume we are doing this on farmland, we enforce:
+A
+s
+,
+nonfarmland
+=
+0
+,
+A 
+s,nonfarmland
+​
+ =0,
+A
+s
+=
+A
+s
+,
+farmland
+.
+A 
+s
+​
+ =A 
+s,farmland
+​
+ .
+Meaning all solar acres are on farmland (no commercial/industrial lands are part of this project). This doesn’t change any numbers since we weren’t considering nonfarmland anyway, but we explicitly set it to avoid any solution that might have tried to allocate solar on “nonfarmland” category if that was an option (which we didn’t really allow by not introducing such in objective or constraints except as these variables). Essentially, it’s just to satisfy the notion that the model is focusing on farmland solar.
+Prime farmland cap:
+A
+s
+,
+prime
+  
+≤
+  
+A
+s
+,
+prime
+max
+⁡
+.
+A 
+s,prime
+​
+ ≤A 
+s,prime
+max
+​
+ .
+If we want to limit prime soil usage, we set $A^{\max}{s,\text{prime}}$. For example, Michigan draft guidelines suggest avoiding prime farmland for solar if possible, or using <50% prime for a project. We could set a fraction like $A^{\max}{s,\text{prime}} = 0$ (strict avoidance) or = some acres. Let’s assume the site has some prime portion. If the whole site is prime farmland, then this constraint would force $A_s=0$ if $A^{\max}_{s,\text{prime}}=0$. That would make solar impossible unless we relax it. In practice, many utility-scale projects do use prime farmland because often that’s where open flat land is.
+We might consider $A^{\max}_{s,\text{prime}}$ in sensitivity: if policymaker says “no more than 25% prime”, then we enforce that. If the site was 100% prime, then the project can only use 25% of that land for solar. For now, let’s not fully forbid prime but maybe limit if needed. We can set e.g. $A^{\max}{s,\text{prime}} = A{\text{tot}}$ if we’re not focusing on it (meaning no effective cap). Or set some fraction for demonstration. We’ll keep it general as above.
+Slope constraint: For each parcel $p$ used for solar:
+slope
+(
+p
+)
+  
+≤
+  
+slope
+max
+⁡
+.
+slope(p)≤slope 
+max
+​
+ .
+If the site has slopes > $\text{slope}_{\max}$, effectively those portions cannot be counted in $A_s$. If we had parcel subdivisions, we’d ensure not picking those. If the entire site’s slope <= max, then it’s fine.
+In linear model, if we had choice to partially use a parcel’s area, we’d need a more complex model (because maybe out of a 50-acre parcel, only 30 acres are <5% slope, etc.). Without that granularity, likely we assume the site was pre-screened such that enough flat area is available. We include this constraint for site selection context more than something the solver adjusts (since we don’t have an alternate site to choose if slope fails – except choosing not to use some acreage, but we didn’t segment $A_s$ by slope region). We’ll assume either the site meets slope or not consider parts that don’t.
+Cleared land only:
+A
+s
+,
+cleared
+=
+A
+s
+,
+(
+and thus 
+A
+s
+,
+forested
+=
+0
+)
+.
+A 
+s,cleared
+​
+ =A 
+s
+​
+ ,(and thus A 
+s,forested
+​
+ =0).
+We enforce no forest clearing. This means if part of the site is wooded and would need cutting to use for solar, we simply won’t use that part. So $A_s$ can only come from already cleared land. If $A_{\text{tot}}$ included forest, effectively the forest portion should remain unused (or could be part of $A_c$ if they decide to clear it for agriculture? But presumably if it was forest and not cleared farmland, $A_{\text{tillable,cleared}}$ wouldn’t count it as tillable, so if you cleared it for crops you’d increase tillable acres – but farmland preservation might not count that? Actually, PA 116 and others encourage not clearing forest for farming either under some programs. But not our focus.)
+So this constraint indicates $A_{s,\text{forested}}=0$: the model cannot satisfy objectives by converting forest to solar. It either leaves it or at most might consider turning it to crop (if allowed and profitable) – but if it was forest, likely not part of $A_{\text{ag}}$ originally either.
+Proximity to grid constraint:
+dist
+(
+site
+,
+substation/transmission
+)
+  
+≤
+  
+D
+max
+⁡
+.
+dist(site,substation/transmission)≤D 
+max
+​
+ .
+If our site is, say, 1.5 miles from a substation and we set $D_{\max}=2$ miles, it’s fine. If site was 5 miles away and $D_{\max}=2$, the project would not be considered viable (line extension too far). Usually, this would be a site screening criterion rather than a decision variable – you’d not choose a site beyond a certain distance.
+So we assume this is satisfied or else $Z$ would likely be 0 (if local zoning might also consider whether you can get power out). We can set $D_{\max}$ to something like 5 miles just to not bind if we think our site is closer anyway.
+State setback rules (explicit):
+setback
+road
+≥
+50
+ ft
+,
+setback 
+road
+​
+ ≥50 ft,
+setback
+nonparticipant line
+≥
+50
+ ft
+,
+setback 
+nonparticipant line
+​
+ ≥50 ft,
+dist
+(
+fence
+,
+occupied structure
+)
+≥
+300
+ ft
+.
+dist(fence,occupied structure)≥300 ft.
+These ensure the design reserves at least the specified distances. By including them, we confirm the site layout plan will incorporate these buffers. We already implicitly reduced area by $\delta_{\text{setback}}$, but listing them ensures we adhere to specifics. They don’t need separate decision variables since they’ll just be satisfied by layout – we include them as constraints to not forget them.
+Parcel hosting capacity: If multiple parcels $p$,
+P
+PV
+(
+p
+)
+≤
+H
+(
+p
+)
+∀
+p
+.
+P 
+PV
+​
+ (p)≤H(p)∀p.
+If we had, say, two different feeder locations, each with its own hosting, we’d split $P_{\text{PV}}$ accordingly and limit each. But in our case, one site, one limit (which is $P_{\text{interconnect-available}}$ we already used). So this is largely redundant for single parcel, or encompassed by that constraint.
+We include it for multi-parcel scenario completeness.
+7.20 Subsidy qualification constraints (target 50%)
+We fix the binary qualifiers to ensure 50% ITC:
+y
+PWA
+=
+1
+,
+y
+DC
+=
+1
+,
+y
+EC
+=
+1
+,
+y 
+PWA
+​
+ =1,y 
+DC
+​
+ =1,y 
+EC
+​
+ =1,
+η
+ITC
+=
+0.50.
+η 
+ITC
+​
+ =0.50.
+This means:
+The project will pay prevailing wages and utilize qualified apprentices (so it doesn’t lose the base 30% ITC – by law if you don’t do PWA, ITC base drops to 6%). We definitely need $y_{\text{PWA}}=1$ to keep 30%.
+It will meet Domestic Content requirements to get +10% (so $y_{\text{DC}}=1$). We assume any cost premium for using domestic panels/equipment is either small or absorbed – not explicitly modeled, but it’s an implicit assumption that the developer will bear it to get the higher ITC (we could reflect it in CAPEX if desired, but skip detail).
+It is sited in a designated Energy Community or meets one of those criteria (+10%). We assume yes ($y_{\text{EC}}=1$), perhaps the site is in a county with historical fossil employment or meets low-income area criteria.
+Setting $\eta_{\text{ITC}}=0.50$ ensures our NPV calculations used 50%. If these were not all 1, $\eta_{\text{ITC}}$ would be 0.3 or 0.4 accordingly. But we target 50% specifically (like maybe Domestic Content or Energy Community might be optional, but we assume they achieve it).
+In summary, the model will treat half of the solar CAPEX as covered by the tax credit (in present value). We’ve thus locked in those compliance actions as constraints rather than leaving them to choice, since likely the developer will take all steps to maximize ITC because it’s highly beneficial.
+8. Optimization engine
+We solve the model in two stages: Stage A: Maximize feasible lease ($L_{\text{solar}}$) subject to developer viability.
+Problem formulation (Stage A):
+Maximize $L_{\text{solar}}$
+subject to:
+Land constraint (7.1)
+Non-negativity (7.2)
+Capacity-area coupling (7.3)
+(Optional: Budget cap 7.4, Op cap 7.5, Labor cap 7.6 if relevant)
+Farmland-preservation 51%/income (7.7)
+PA 116 condition binaries and pollinator score (7.8)
+Zoning/permits (7.9, 7.10, 7.11, 7.12)
+Interconnect constraints (7.13, 7.14)
+Distribution constraints (7.15)
+Agrivoltaic design constraints (7.16, 7.17, 7.18)
+“Right land” constraints (7.19)
+Subsidy constraints (7.20)
+Developer NPV constraint: $\sum_{t=0}^T \text{NCF}t^{(\text{dev})} \text{DF}t \ge \text{NPV}{\min}$ (with $\text{NPV}{\min}=0$ typically).
+Integrality: If MILP (config choices $y_k$ present), those $y_k$ are binary. We can solve with a MIP solver. If we fixed config, it’s a pure LP. Other binaries like the compliance ones are forced =1 anyway (which essentially removes their binary nature as a decision – they’re fixed parameters in the solve). So the only binary that might affect solve is $y_k$. If we stick to one config, no binary at all and it’s just an LP.
+Feasibility check: If no solution exists with $A_s>0$ satisfying NPV ≥ 0, then it means even at $L_{\text{solar}}=L_{\min}$ developer can’t break even (i.e. project not viable under given prices/costs unless maybe farmer accepted lower lease). But we have a lower bound $L_{\min}=500$. If that’s too high to break even, maybe no solution (except trivial $A_s=0$). If that happened, we might relax $L_{\min}$ down until viability or conclude solar doesn’t work economically. We assume it will be viable in our base case.
+Unboundedness check: If developer NPV constraint is easily satisfied even at $L_{\max}$, the objective might try to increase $L_{\text{solar}}$ to the upper bound $1200. If even at $1200$ developer NPV ≥ 0 (which would be surprising – that means solar economics are so good they can pay max rent and still have NPV >= 0), then the optimum is $L_{\text{solar}}=1200$. Or if $L_{\max}$ was not there, it could go unbounded which is not realistic physically (since beyond some point NPV <0 would happen, but if our NPV constraint isn’t binding then something’s off – maybe the farmland % constraint stopped adding more $A_s$, but then $L$ can still go up a bit? Actually, if farmland 51% caps $A_s$, then making $A_s$ smaller might allow slightly higher $L$ to still meet NPV=0 since smaller project = less total profit for developer, they might afford higher $L$ per acre to give away all profit. There might be an optimum interior solution due to that interaction.)
+Anyway, the solver will handle it. If $L_{\max}$ binds, then probably either developer NPV constraint wasn’t binding (meaning even at $1200$ developer had NPV > 0, so the limiting factor was just our imposed cap or farmland area).
+After solving, we extract $L_{\text{solar}}^$ and $A_s^$ (and any other variables of interest like $P_{\text{PV}}^$, though that is directly from $A_s^$). The developer NPV constraint will be tight at optimum (if $L_{\text{solar}}$ < $L_{\max}$). Or farmland 51% might have limited $A_s$ which indirectly limited how high $L$ can go because if $A_s$ is fixed maximum, developer could still pay more until NPV=0 binds. Actually, if $A_s$ is fixed by 51%, then the developer NPV constraint becomes linear relation between $L$ and that fixed $A_s$. They’ll push $L$ until NPV=0 exactly. So indeed, either NPV or $L_{\max}$ will bind.
+Stage B: Maximize landowner’s objective (with $L_{\text{solar}}$ fixed at $L^*$).
+We set $L_{\text{solar}} = L_{\text{solar}}^*$ as a constant (treat it as now a parameter equal to whatever was found). This effectively converts the annual lease revenue per acre into a known number.
+Now solve an LP: Maximize (e.g.) $\sum_{j} A_{c,j} \cdot (\text{PV of crop profit per acre}_j) + A_s \cdot (\text{PV of lease per acre})$. This can be done by either explicitly summing discounted flows or by using the coefficient approach described where $\Pi_{\text{crop},j}$ and $\Pi_{\text{lease}}$ are used as coefficients. Alternatively, we could maximize immediate annual profit as proxy if proportions remain similar (but because of discounting and yield degradation maybe better to do PV directly; we can also maximize undiscounted annual profit if all options have similar time profiles – not exactly true here since solar power declines slightly, crops maybe constant, but we’ll do proper PV sum in calculation then use those as weights). However, since this is linear, we might incorporate the discounting into these coefficients:
+Compute $V_{\text{lease}} = \sum_{t=1}^T (L_{\text{solar}}^* \cdot \text{DF}t)$ (present value of $1/acre-year over project life at $r$), then the PV of lease per acre = $L{\text{solar}}^* \cdot V_{\text{lease}}$ (which is just $L_{\text{solar}}^* \times$ annuity factor).
+Compute $V_{\text{crop},j} = \sum_{t=1}^T [(Y_{j,t} P_{j,t} - \text{OpCost}{j}) \cdot \text{DF}t]$ (present value of net crop revenue per acre). Also, if keeping land in crops yields annual PA 116 tax credit (say $5/acre-year typically, which it might be around that magnitude in tax savings), we could add that for those years. But since if any solar, credits deferred for all acres? Actually, if partial land remains, do they still get partial credit? It’s unclear in rules. Possibly not – might lose entire credit for contract during solar period. But some sources suggest if you amend, you temporarily remove those acres from the program, maybe you still get credit on remaining acres? Let's assume worst-case: no credit on entire farm while solar present. That means in our scenario, if any $A_s>0$, the farmer loses credit on $A_c$ too in those years. That would slightly reduce $\Pi{\text{crop}}$. For fairness, we might ignore the credit entirely in PV of crop (like not count it whether solar or not) or consider it lost which just decreases $V{\text{crop}}$. However, since the 51% rule is to keep them in program, they likely still get credit on farmed portion if the contract is amended to remove only solar acres from agreement or extended such that credit is deferred only on those acres? The actual mechanism is complex. For simplicity, we’ll assume the tax credit is fully deferred (no credit at all) during project. In that case, crop PV during that period is solely from crop sales. If they had no solar, they'd be getting a credit on all acres (which would increase crop profitability slightly). But since we are comparing with solar scenario, maybe better to consider baseline farmer gets those credits – but then we’d be maximizing difference. This could complicate objective. Perhaps safer to assume the farmer is viewing it from “given I am in PA 116, I want to maximize my returns abiding by rules, the credit will come or not accordingly but I'm not optimizing it separate because it's tied to the rules." So we enforce the rule and maybe just exclude credit from objective (since it's fixed given 51% is satisfied or not – well if 51% not satisfied they'd lose credit plus pay penalty, but we disallow that).
+We'll therefore ignore PA 116 credit in objective coefficients, and trust the constraint to keep land in compliance to avoid penalty. This means we slightly undercount the benefit of crop-only scenario (because crop-only would yield tax credits each year). But since we’re focusing on scenario with solar, that difference is mostly initial condition vs with solar scenario. Possibly, including it would just add a constant to all feasible solutions that meet 51% (since as long as 51% is met, credit flows presumably occur on those acres or not? Actually if solar, credit deferred for whole parcel likely so maybe it's not constant, it’s actually 0 with solar vs some thousands without any solar. That is an opportunity cost of doing any solar at all. The model doesn’t explicitly subtract that. However, because we didn’t include it in objective, it’s implicitly assuming credit lost is just a necessary cost of doing solar but not optimizing it. If the credit is significant (they usually aren’t huge, a few dollars per acre from state tax), it might not sway decisions too much. We'll mention in sensitivity possibly.) Enough – we proceed without credit in objective, effectively treating credit as outside context except constraint forcing compliance.
+Then our objective becomes: maximize $A_s \cdot (L_{\text{solar}}^* \times V_{\text{lease}}) + \sum_j A_{c,j} \cdot V_{\text{crop},j}$.
+This is linear (since $L_{\text{solar}}^*$ and those $V$ coefficients are constants now).
+Subject to all the same constraints as before except the developer NPV constraint (which is no longer needed because we fixed $L_{\text{solar}}$ and we know at Stage A optimum it was binding or fine – adding more $A_s$ now only makes developer NPV >0, which is allowable because the constraint was ≥0, not exactly 0. So developer is still okay). We do need to consider if developer would actually be willing to build more acres than Stage A solution if it gives them positive NPV (likely yes they would, but we only promised to pay $L^$ on those acres, which was set assuming break-even at Stage A area. If adding more acres, developer NPV >0 means they now do better than break-even at that $L^$. They wouldn’t object, presumably, as long as they have capital. So it’s feasible. If we had insisted developer NPV = 0 exactly, then any increase in $A_s$ would break that equality. But since it’s ≥, it’s allowed. So it’s consistent: Stage A found maximum $L$ such that for a given maybe smaller $A_s$ developer was at break-even. If farmland rule forced smaller $A_s$, developer might have had slack NPV, or if not farmland rule, Stage A likely made $A_s$ as big as beneficial (maybe up to interconnect limit or such) while hitting NPV=0. Actually, in unconstrained, developer NPV≥0 and maximizing $L$, they might reduce $A_s$ if that lets them raise $L$ more. But farmland 51% sets a floor on how low $A_s$ can drop? Wait, farmland 51% sets a maximum $A_s$ (49%). If to maximize $L$ developer could choose to use less than that (smaller project yields higher $L$ because easier to break even?), possibly – because if project is smaller, absolute profits scale down but maybe NPV per acre improves? Actually, usually NPV per acre is roughly constant if returns to scale are constant. But if say interconnect upgrade is a step cost that hits when going bigger, a smaller project avoids that cost, so NPV/acre might be higher for smaller project, allowing a higher $L$. So maybe Stage A could choose $A_s$ smaller than max to enable a higher $L$ if that yields a better objective. The outcome could be that Stage A solution has $A_s$ smaller than allowed max. Stage B could then propose using some of the remaining allowed land for crops vs expanding solar. But if solar on additional acres would yield developer positive NPV, the farmer might then want to convert those too because developer would presumably be willing (the model doesn’t re-adjust $L$ upward if we add more acres; it's fixed at max that was possible at break-even for original size, but now if project is bigger and still at that rent, developer actually earns >0 – meaning we could have paid a bit more rent if we had known we’d do more acres. The sequential approach might slightly over-favor solar acres because it locks in a high rent that was calculated for a smaller project. For consistency, one might instead maximize total farmer NPV with NPV≥0 in one go (that’s a single-level bilevel solution). Our two-stage might give an upper hand to farmer: they squeeze high rent on initial margin, then take more acres which gives developer profit. Actually fine for farmer – developer just gets extra profit as a windfall because we didn't increase rent accordingly. But farmer maybe could have gotten even higher rent if known they'd allow more acres. But farmland 51% stops them from doing all acres anyway. It's a slight imperfection in sequential approach. But likely Stage A will go to constraint like farmland or interconnect anyway and not artificially hold $A_s$ smaller, unless interconnect cost caused diminishing returns.) This is complex, but given typical parameters, I suspect Stage A will either:
+Hit farmland 49% and find $L$ such that NPV=0, or
+Or hit some $L_{\max}$ or other cap, meaning developer still has slack NPV at that $L$. If so, in Stage B adding more $A_s$ up to farmland limit will increase farmer NPV and developer still okay, potentially leaving developer with >0 NPV since we didn't renegotiate $L$. In reality, if developer could do more acres profitably at that rent, maybe they'd negotiate lower rent for those extra acres or something. But our model doesn't renegotiate; it's one rent rate for all acres. So the developer got a slightly good deal on extra acres – but farmer is still happy because they fill farmland requirement and still get the high rent per acre. Actually, farmer might say "hey if you want more acres beyond X, pay me more or no deal". But then $L$ already at max cap maybe. Anyway, these nuances aside, we proceed.)
+Solve Stage B LP:
+If $J>1$, it will also decide which crops to plant on $A_c$. If one crop yields higher net present value per acre, it will allocate all $A_c$ to that (unless we put rotation or diversity constraints, which we didn't explicitly). We could optionally add a constraint like $\sum_j A_{c,j} = A_c$ and maybe fix proportions if rotation is needed. But no instruction on that, probably assume monoculture or an average return.
+All the same constraints (7.1–7.20) except the developer NPV one are still in effect:
+Land $\le A_{\text{tot}}$,
+$A_s + A_c \le A_{\text{tot}}$, 51% rule, etc.
+Zoning, etc.
+Now $L_{\text{solar}}$ is constant so 7.20 essentially already accounted for, and those binary constraints are fixed.
+Feasibility: Stage B will definitely have a feasible solution because Stage A’s solution $A_s^, A_c^ = A_{\text{tot}}-A_s^*$ is one feasible point (maybe not optimal if objective changed, but feasible because it met all constraints and now with $L$ fixed it's only easier for developer).
+It should be bounded since $A_s$ and $A_c$ are bounded by land and farmland req.
+Solve yields new $A_s^{}, A_{c,j}^{}$ (optimal land allocation given rent). Let’s call them $A_s^{\text{opt}}, A_{c,j}^{\text{opt}}$ final.
+Extract solution including:
+$A_s^{\text{opt}}$ (could be same or larger than Stage A’s $A_s^*$),
+$A_{c,j}^{\text{opt}}$,
+other variables ($P_{\text{PV}}^{\text{opt}}$, which is directly $A_s/\alpha$, etc., all the compliance binaries are 1, etc., we know those).
+We then have our final plan:
+$L_{\text{solar}}^*$ (rent per acre),
+acres of solar and what remains in crops,
+developer is at least break-even, possibly ahead if $A_s$ grew after Stage A,
+farmer maximized their benefit within rules.
+Edge cases: If Stage A solution ended up at $A_s$ smaller than allowed because of interconnect cost or something, Stage B might push $A_s$ higher (giving developer positive NPV slack). In reality, developer might then be okay sharing some of that slack to get more land (maybe they'd have been willing to pay slightly more rent to get more acres, but they were at max $L$ anyway if $L_{\max}$ hit or at break-even optimum which had slack though? Perhaps not possible to have slack at optimum unless a non-binding constraint ended objective prematurely like $L_{\max}$).
+Anyway, we accept that slight non-equilibrium in rent negotiation.
+9. Post-processing
+After obtaining the solution, we perform the following:
+Report optimal allocations:
+Solar acres $A_s^$ and each crop’s acres $A_{c,j}^$. For example, “Optimal solution allocates $A_s^* = 49$ acres to solar and $A_c^* = 51$ acres to crops (e.g. 51 acres of corn).”
+The chosen solar configuration (if multiple were considered and $y_k$ variables were used, we’d report which $y_k=1$).
+Confirm that $L_{\text{solar}}^*$ = some value (say $X/acre-year) was the result.
+If any binary like repower was in play, report its value (likely $z_{\text{repower}}=0$ meaning plan is to decommission at end since we didn’t model repower benefits; if we had, we’d see if repowering could extend project NPV).
+Objective value:
+Stage A objective was $L_{\text{solar}}$. We report the maximum rent found (maybe compare it to typical $800$ to see if it’s on high end or low end of expected range).
+Stage B objective (farmer NPV): we can compute the actual NPV for the farmer (and also for developer) now.
+Actually compute farmer NPV = PV(lease revenues + crop profits + tax credits if any) over T, minus any costs they bear (crop costs).
+Compute developer NPV = PV(solar revenue - all costs) with the final $A_s$. Ideally, it should be ≥0 (if our constraint was slack, it might be >0). If >0, that means at $L_{\text{solar}}^*$ the developer actually does better than break-even for the chosen $A_s$ (as discussed). We note if that happens (shadow price of NPV constraint was not fully used because another constraint like farmland limited $A_s$).
+Possibly we compute total NPV (farmer + developer), but that will double count lease (since it’s cost to one, revenue to other). Actually, total NPV = project NPV (developer) + farmer's crop NPV + lease payments which cancel out in sum, plus any tax credit the farmer would have gotten without solar minus what they lost. But since lease internal transfer cancels, total NPV basically reduces to developer’s NPV + farmer’s crop NPV (and tax credits if we consider baseline vs with solar scenario). But maybe not needed to present total, better present each stakeholder.
+Constraint slacks / binding analysis:
+Identify which constraints are binding at optimum:
+Land availability likely binding ($A_s + A_c = A_{\text{tot}}$ if all land is used).
+The farmland 51% is likely binding (we expect $A_c = 0.51 A_{\text{tot}}$ if solar is profitable enough to push to the limit).
+If $A_s$ ended up exactly $0.49 A_{\text{tot}}$, then yes binding.
+If not, maybe something else bound it (like interconnect capacity or budget).
+We check if $P_{\text{PV}} = P_{\text{interconnect-available}}$ held. If yes, grid capacity was maxed out. If no, then something else stopped adding more solar (like farmland rule or diminishing returns).
+Check if $L_{\text{solar}}$ hit $L_{\max}$ or was determined by NPV constraint. If $L_{\text{solar}} = L_{\max}$, then rent was capped by policy/market, not by project economics (project could have paid more in theory).
+If $L_{\text{solar}} < L_{\max}$, then developer NPV constraint bound it.
+If $L_{\text{solar}} > L_{\min}$ obviously since we maximize it.
+Check OpCap or LaborCap if we had them: likely not binding unless we put small values to test. If not binding, they have slack (like if OpCap was large enough not to matter).
+Check capital budget: was it binding? If BudgetCap was set low and project wanted to use more capital, it could bind. If not, slack.
+Check prime cap if we set one: did $A_{s,\text{prime}}$ hit $A^{\max}_{s,\text{prime}}$? If yes, that constraint is active and prevented using more prime acreage, possibly leaving some less prime land to use if available or forcing project to stop if only prime was left.
+Summarize: e.g. “The land use constraint and 51% ag-use requirement are binding (solar uses 49 acres, exactly the allowed maximum under the rule). The interconnection capacity (5 MW limit) is not binding in this scenario (optimal PV = 4.9 MW uses the allowed land; this stays under the 5 MW cap). The operating budget and labor constraints are not binding (only 60% of available labor is utilized). The prime soil constraint was not activated in this case because the site’s prime acreage (20 acres) lies within the allocated 49 crop acres, meaning the 49 solar acres were placed on non-prime land.” etc.
+Cash flow generation:
+Construct an actual year-by-year cash flow table for the developer and farmer if needed:
+Year 0: Developer: CAPEX (land purchase if any, but here just solar CAPEX net of ITC). Farmer: maybe nothing year 0 (they might get some signing bonus? Not mentioned, skip).
+Years 1–T: Developer: Revenue from solar, minus O&M, minus lease, etc., plus replacement at year 15, minus decom at year 25 plus salvage.
+Farmer: Lease income, crop income, minus crop costs, plus any tax credit (if they keep it on remaining land – but as discussed, likely credit suspended entirely, in which case farmer’s baseline without solar would have had some credit ~$5/acre-year and now gets 0; but since we ensured compliance and extension, they avoid payback penalties – we might mention that they would resume credits after project).
+Use these flows to confirm the NPV values we reported.
+Check developer’s IRR from those flows: if NPV=0 at discount r, IRR = r. If NPV>0, IRR > r. We can compute IRR by trial or built-in in a spreadsheet environment.
+Payback: see when cumulative developer cash flow becomes positive (could be never until salvage if at break-even; if at slight profit, maybe after salvage or earlier).
+We can state “Developer IRR is ~X% (equal to the discount rate of Y% since we set NPV=0 threshold) or Developer IRR = 6% vs discount 5% if they ended up with some surplus. Farmer’s IRR in terms of incremental investment is infinite because they have no investment (just gain), or if consider farmland itself as an asset, their return could be something like lease yields etc.” Hard to define IRR for farmer since they didn’t lay out capital specifically for solar, except the opportunity cost of not farming that portion.
+Verification of constraints in solution:
+Check $A_s + A_c = A_{\text{tot}}$ or ≤, see slack.
+Check $A_{\text{ag}}$ vs $0.51 A_{\text{tot}}$ equality.
+Check Score_poll >=76 (we assume we meet exactly like score=76 likely; anyway, we set as requirement so presumably satisfied).
+Check $B_{\text{decom}}$ vs $\widehat{C}_{\text{decom}}$: we should ensure if per acre decom was $72k and bond $10k, this constraint likely is not satisfied unless salvage covers rest. Actually, in Michigan, they often allow salvage value to offset bond amount required, but our constraint didn’t include salvage (we said bond ≥ total cost). If our solution had $C^{\text{bond}}=10k and $C^{\text{decom}}=72k, we violate $10k \ge 72k. So in reality, developer would have to put a larger bond. We should see that and note that in solution we would need to up $C^{\text{bond}}$ to meet it, which would slightly reduce NPV (but maybe we had slack or we neglected that). We might adjust $C^{\text{bond}}$ input to e.g. $75k/acre if including all decom cost – that would obviously hurt NPV. Perhaps we should have just set $C^{\text{bond}}$ to match $C^{\text{decom}}$ earlier. But the prompt gave $≥10k minimal, not equal. Possibly expecting bond covers salvage gap. Actually, salvage $12k could cover part of $72k, leaving net $60k cost, maybe requiring bond ~$60k. We only put 10k, which is insufficient. If this was discovered, the model would need to cover difference, maybe developer’s cost bigger. We can mention that in validation: bond chosen should be adjusted upward or that constraint is indicating 10k isn’t enough and they’d have to raise it, which might slightly lower NPV (though bond itself is returned after decom if used correctly – but often not considered in NPV as cost because it’s returned minus any shortfall, but safe to count it as cost if no guarantee salvage covers it fully).
+Check other binaries: we set all to 1, so that’s fine.
+Essentially ensure nothing was overlooked (like we satisfied all enforceable conditions).
+Meet “retail vs wholesale” display: We will highlight the difference between the retail 0.19 $/kWh reference and the actual sell price we used (like $P^{\text{elec,sell}}_0 e.g. $0.05/kWh). For example, we might say: “Note: The value of solar energy in this model is based on a sell price of $0.05/kWh (wholesale PPA rate), not the $0.19/kWh retail rate – the latter is shown only as a reference for what retail electricity costs, not as project revenue. The project’s economics are thus appropriately conservative on revenue.” This addresses any misunderstanding that one might simply use retail price to value generation for such a project (which would wildly inflate NPV).
+Summarize key metrics:
+Developer NPV and maybe IRR, to see viability (it should be zero or a small positive by design).
+Farmer additional annual income (lease + maybe how it compares to previous farming income).
+Combined land productivity improvement maybe: e.g. total NPV of combined scenario vs if they just farmed everything (maybe we can compute baseline: if just farming 100 acres, what’s NPV? Then with solar on 49 acres + farming 51 acres, what’s combined NPV – likely much higher with solar lease).
+Payback period for developer if asked (e.g. maybe ~12-15 years if initial outlay recovered by ongoing cash flows at discount).
+BCR of project maybe ~1 (because we forced NPV=0).
+BCR for farmer’s “investment” (they have none, so infinite ratio theoretically; or if consider lost future credits or lost yields on solar land as “cost”, one could measure that, but easier to just say they greatly benefit).
+Scenario / constraint binding discussion:
+We might mention scenario comparisons qualitatively: e.g., “If power price was higher or ITC 50% not achieved, results would differ – see sensitivity section.”
+Possibly present how constraints binding indicates trade-offs:
+If farmland preservation is binding, it essentially sets max solar. If that rule changed to, say, 100% allowed, obviously then all land would go solar because it’s more profitable (assuming no other cap).
+If interconnect was binding, that sets max MW regardless of land.
+If $L_{\max}$ was binding, then even if developer could pay more, we artificially limited rent by assumption – maybe in reality if economics allow more, contracts might go above historical 1200 range.
+We ensure to mention any unmet conditions or errors:
+If the model faced some search or value that didn't make sense (like $A_s$ fractional acres, we might allow fractional, but realistically $A_s$ can be fractional in linear solution but you’d round to nearest acre in implementation – not an issue to mention in outline).
+If any input needed assumption – we mention assumptions we made (like ignoring tax credit in objective as explained).
+If we had trouble with the bond vs decom number, note that we might need to adjust that parameter in final implementation.
+10. Sensitivity analysis
+We test how results change with key parameter variations:
+Energy price and policies:
+Increase $P^{\text{elec,sell}}0$: e.g. from $0.05 to $0.06 or $0.08/kWh. Higher sale price -> higher solar NPV -> developer can pay higher $L{\text{solar}}$. Likely result: $L_{\text{solar}}^*$ goes up, possibly hitting $L_{\max}$ if not already. If it hits cap and still NPV >0, then some slack or if farmland limit binding, might not change $A_s$ if it was already at max allowed. If originally farmland limited $A_s$, even at higher price developer just gets more profit or could pay more rent if not capped. If not farmland limited, higher price might allow using more land or interconnect capacity since it’s profitable to pay upgrades etc. So we’d see possibly full land use if earlier it was limited by economics.
+Decrease $P^{\text{elec,sell}}0$: if dropped to $0.03/kWh, maybe project NPV might be negative at $L=500$ (lowest rent) for any decent size, thus no viable solar lease could meet break-even (the solution might then be $A_s=0$ optimal, meaning just farm all land). Or it could drastically lower $L{\text{solar}}^*$ (maybe down to $100/acre-year if that was allowed – but our $L_{\min}=500$ stops it, so if it needs to drop below 500 to be viable, our model would either find no feasible solution or would choose $A_s=0$ to avoid negative NPV because it can’t lower $L$ further. That’s something to mention: if econ are that bad, developer wouldn’t build rather than pay high rent, so effectively $A_s=0$ and farmer just farms, which is a corner solution).
+Solar output degradation ($d$): if increase $d$ to 1%/yr (meaning panels degrade faster), then lifetime output reduces -> lower NPV -> can pay less rent. Would see slight decrease in $L_{\text{solar}}^*$.
+Curtailment $\phi^{\text{curt}}$ or $\phi^{\text{export}}$: if curtailment introduced (like utility says you can only export 80% of what you produce during mid-day), then solar revenue drops => less rent affordable => maybe less $A_s$ if borderline. Possibly farmland rule still the main limit unless curtailment so high that solar NPV even at full land is <0 at any positive rent, then no solar. We’d observe threshold at which viability breaks.
+$\alpha_{\text{ac/MW}}$ (land per MW): if we consider vertical bifacial (which might be ~2.5 acres/MW but spaced differently?), or denser packing vs more spacing for agrivoltaic, $\alpha$ changes. If $\alpha$ increases (needing more acres per MW e.g. two-axis trackers with 9 ac/MW), then for the same $A_s$, $P_{\text{PV}}$ is smaller -> less revenue per acre -> less NPV/acre -> lower rent possible. On other hand, trackers produce more kWh per MW than fixed tilt (which we didn’t explicitly model; we could incorporate that in $E_0$ perhaps). But we can vary $\alpha$ to simulate different panel layouts. If $\alpha$ smaller (vertical panels tightly spaced produce less per panel but maybe more per land in some cases, not typical, but say fixed tilt at 5.5 vs trackers at 6.3), we see minor effect on land usage vs capacity. If farmland rule binds acres, a larger $\alpha$ means less MW can be installed for that max acres, so smaller project, less rent (since rent per acre might adjust as developer can’t earn as much per acre with fewer MW on it).
+CAPEX and OPEX changes:
+Lower $C^{\text{inst}}$ (cost per W): if costs fall (e.g. panels get cheaper), developer NPV improves -> can offer more rent. Possibly enabling more land to be used (if previously limited by NPV).
+Higher site prep or grading costs: if our project had particularly high costs (rocky site requiring $11k/acre grading), that could lower NPV by some $ per acre, reducing rent or viability on marginal acres (maybe they’d leave rough part unused). Possibly model would then not use some acres that need heavy grading if it had that choice (we didn’t provide variable cost per acre varying by which acres used, that would be more complex, but one could simulate by separate land categories with different cost).
+Increase $\alpha^{\text{inter}}$: if interconnection upgrades are more expensive (40% vs 20%), then larger projects become less attractive. Could result in smaller optimal $A_s$ or lower rent. Possibly farmland rule still 51%, but maybe developer NPV constrains $A_s$ to smaller than 49% if upgrades beyond some MW become too costly. We might see a scenario where optimal $A_s$ is less than allowed 49% if going beyond that triggers high upgrade costs that make those extra MW not worth it at that rent (so developer NPV constraint would bind at a certain size lower than farmland limit).
+O&M cost or insurance: if these go up, NPV goes down -> less rent or less solar. Vice versa for cost reductions (like improved panel reliability lowering O&M).
+Inverter replacement timing: if $t_{\text{inv}}$ earlier or cost higher, similar effect slight NPV reduction.
+Decommissioning cost changes or salvage changes: If salvage prices drop (less scrap value) or decom cost rises (maybe due to recycling mandates, etc.), then end-of-life liability increases -> reduces NPV slightly (though present value of something 25 yrs out is not huge, but still a few percent difference). We can test if requiring full site restoration vs partial (like leaving some gravel etc.) changed viability. Probably minor impact on rent.
+Discount rate $r$: If $r$ increases (higher cost of capital), future revenues worth less -> project NPV goes down -> can’t pay as much rent. Possibly farmland rule still binds so $A_s$ same but $L$ lower. If $r$ decreases (cheaper financing environment or looking at societal perspective), NPV improves -> more rent feasible.
+Shared caps:
+If $\text{BudgetCap}$ was active, raise or lower it: if it was binding (like developer only had $X to invest), raising it allows more solar acres (if they were limited by budget not by land or viability). Lowering it could force a smaller project than economics would otherwise allow. We mention if we did a scenario like budget only $1M, then maybe could only build ~2 MW, etc.
+$\text{OpCap}$ or $L_{\max}$ (labor): if labor cap was binding, relaxing it allows using more labor-intensive crops or more acres farmed. If it wasn’t binding, changing it does nothing. If we tighten it drastically, maybe they’d choose to drop some crop acres (maybe leaving some land fallow if they can’t manage it). Or if solar required some labor and it’s limited, might restrict $A_s$ too.
+If we had a scenario where farmer themself had to do panel cleaning, maybe that becomes a limiting factor. But not likely here.
+Permitting/interconnect sensitivities:
+$Z$: if $Z=0$ (not permitted), trivial result $A_s=0$. Not interesting except to highlight that project couldn’t go forward without meeting zoning – which we ensure by $Z=1$ in base. More interesting: if $A_{\text{zoning-allow}}$ was smaller than farmland 49% allows. E.g. farmland 49 acres but ordinance only allows 20 acres, then $A_s$ would be capped at 20 by zoning, leaving more land in crops than required. That would severely cut the solar portion vs what state law would allow. We can examine that scenario: result would be $A_s=20$ (zoning binding) and farmland 80 left (way above 51%). The farmer then is underutilizing allowed solar potential due to local law. Their NPV might be lower than if that law wasn’t there. Could mention local restrictions like that significantly reduce income opportunities.
+$\delta_{\text{setback}}$: if increased to 20% (like if needed bigger setbacks due to more houses), then less usable land for solar. If farmland rule was 51%, now not 49% of total can be solar but 49% of total minus setback maybe. Actually, we treat it as simply you lose area – effectively means maximum $A_s$ = 0.49*(0.9*$A_{\text{tot}}$) if combine?
+Actually, if 10% lost to setbacks, farmland rule still refers to total including setback, I think. But we do not count setback area as $A_s$ or $A_c$, it just sits unused (so effectively farmland rule only cares what’s in use vs total including that idle, so to keep 51% in ag use, might have to include or exclude setback in base? I think it includes total parcel, so if setbacks are not farmed (they could maybe be farmed unless fenced out?), then that reduces ag use area –
+Honestly, if setback area is fenced within solar array it’s not farmable either; if outside fence, maybe they can farm up to fence but typically fence goes at property line? Actually, they often still farm outside fence up to property line except a strip for access.
+Possibly too granular, skip it. We assume setbacks cut from solar but could still be counted as part of farm if outside fence. Hard call, skip complexities: treat $\delta_{\text{setback}}$ simply as solar area reduction and not affecting farmland fraction beyond reducing what $A_s$ can be.)
+$h_{\max}$: if were smaller (like 14 ft), would that restrict ability to farm under? If $h_{\min}$ we need is 8 ft and $h_{\max}=8$, okay. If $h_{\max}=8$ and we needed 14, then can’t do with current equipment; that either means project not feasible unless they get a variance or change equipment. Could test that scenario: if $h_{\max} < \text{clearance}_{\min}$, effectively $Z$ cannot be satisfied along with agrivoltaic requirement, meaning either project can’t meet one requirement. Then either they'd seek a zoning variance or not do it. In the model, that would probably just be infeasible constraints (glare=1, clearance≥14, h_max=8 => no solution for any A_s>0). So they'd yield $A_s=0$.
+So we mention height limits could be a barrier to certain agrivoltaic designs if not adjusted.
+$A_{\text{easement}}$: if increased (like discovered more area with easements that can’t have solar), then effectively less area available. If that area could still be farmed, farmland rule base remains total including it, making meeting 51% easier proportionally (because those easement acres probably count as farmland if they were farmable? But we exclude them from solar so actually farmland use fraction goes up if you consider them in total but still farm them. It's a nuance not needed detail).
+Outcome: fewer solar acres possible, model would accordingly produce less $A_s$ if that was binding.
+$P_{\text{interconnect-available}}$: if we drop it, maybe currently 5 MW, drop to 2 MW – then $A_s$ likely gets capped by that (if farmland rule allowed more). Then they'd only use ~2MW’s worth of acres. Possibly leaving some allowed solar capacity unused. Could illustrate grid constraint effect.
+If we raise it (10 MW available), then farmland rule or other factors become limiting (so if farmland allowed ~5 MW worth of area, that would still be the cap). Unless we also relaxed farmland rule to see effect of grid as only constraint or vice versa.
+$C_{\text{upgrade,max}}$: if increased, maybe they could build beyond initial available capacity by paying more. If lowered, maybe it stops them even before farmland or base capacity due to cost. If we effectively set it very low, it’s like “no significant upgrades allowed, so use at most what’s free capacity”.
+$\text{PV_penetration}{\max}$: if we tighten from 34% to 15% (some utilities use 15% rule at distribution), then maybe the allowed MW is much less. That acts like a $P{\text{PV}}$ cap similar to interconnect-available.
+If we loosen to 100% (some feeders might accept more with upgrades or high load feeders), then as long as physically connecting, that constraint doesn’t matter, leaving others to govern.
+$\text{pf}_{\min}$: if we require pf=1 (no reactive support from inverters), that actually allows a tiny bit more real power output but could violate utility requirements. If we require pf=0.9, that might slightly reduce effective real power (because now they must reserve more capacity for VARs at peaks, meaning they might at times not inject full real power if hitting inverter apparent power limit). We didn’t model that detail. Likely negligible effect on annual energy (only at peaks maybe a 1% difference).
+Farmland-pres/PA 116 sensitivities:
+Pollinator score: if threshold was 85 instead of 76, would need a richer seed mix, maybe costing more (increase in $C^{\text{veg}}$) – not directly in model except we could adjust $C^{\text{veg}}$.
+Not affecting acre allocation, just a small NPV hit, which if significant could lower rent slightly. But pollinator costs are minor relative to energy revenue.
+$\widehat{C}_{\text{decom}}$: if engineer says decom cost is actually $1000/kW ($300k/MW, ~$54k/acre for 5.5 ac/MW) rather than the 300-440 we had (maybe they included more restoration), then bond must cover that ~$54k/acre. If we still had bond at 10k, we’d heavily violate – they'd require raising bond which effectively is just a constraint, but if they can’t raise (like no, they have to, else project not approved). The developer would then have to accept tying up more money or insuring it, which might not kill project but reduces salvage value cushion.
+We can test if higher decom cost (which might equate to just adding a bit to $C^{\text{decom}}$ net present cost) how much that lowers NPV and thus rent. Possibly a small effect because it’s end-of-life and discounted heavily.
+$\mathcal{T}_{\text{defer}}$: if they decided to only defer credits for e.g. 10 years out of 20 (like if they allow partial credit resume when pollinator habitat qualifies as ag after a certain time, which is not in current rule but hypothetically), then farmer might get some credits even during project. But likely no, so not varying that.
+The binary flags essentially must be 1, if any was 0, project fails compliance. We could consider scenario: what if the farmer decides to withdraw land from PA 116 entirely to avoid these requirements? Then farmland-pres constraints wouldn’t apply (besides normal zoning).
+That could allow using all 100% of land for solar (no 51% rule). They’d lose future tax credits and might owe payback of past credits plus a 6% interest penalty (which could be hefty if they had many years left). That would be like a one-time cost for breaking the agreement. We haven’t modeled that scenario, but it’s an interesting alternative:
+we could simulate by removing 7.7 and 7.8 constraints and maybe adding a one-time cost equal to tax credit recapture. See what $A_s$ we get (likely 100%). If that NPV (with penalty) is still positive for farmer vs keeping, perhaps they'd do it. If not, they’d comply and limit solar.
+We could mention that as a scenario: “if farmland preservation rules were not present (or land not enrolled), the optimal would allocate all land to solar, increasing NPV by X, but the farmer would lose Y in tax credits and possibly incur penalty. If that penalty is smaller than the extra solar profit, it might be worth it to them to opt out of the program.”
+If $A_{\text{tot}}$ was in the small range (5-40) or large, we can mention differences:
+If $A_{\text{tot}}=30$ acres (small farm), then not only 51% must remain ag but also $200/acre income. If our crop yields only $150 gross (somehow), then to satisfy income they might need to choose a higher value crop or allocate more acres to ensure enough revenue (like maybe if gross per acre were 100, they'd need 100% in ag to make $>$$200cleared? Actually if $A_{\text{tillable}}=30$ and they put 51% = 15.3 acres in ag, that ag must produce at least $20030 = $6000. So average $392/acre on those 15.3 acres. If corn yields $600/acre gross, they meet it. If they had something like pasture at $100/acre, they'd fail. So they'd either not do solar or switch to a high income crop on remaining land like vegetables or greenhouse etc. So interesting dynamic: to have solar on a small farm, you might need to intensify farming on the rest to meet the income test. Our model could handle that if we had a crop option that yields higher gross but maybe lower profit (like vegetables yield $5000 gross but cost $4000, net $1000 – gross meets rule easily, profit maybe same as corn but work more; but rule cares gross, not net).
+We could illustrate: if $J$ had a crop with high gross and high cost, the model might pick it just to satisfy income test cheaply (like break-even net but huge gross to satisfy rule).
+Perhaps mention: “For smaller farms, the gross income requirement can force the farmer to dedicate some land to high-value production to satisfy the $200/acre threshold even if it’s not the most profitable choice, or effectively prohibit large solar installations if they cannot maintain enough ag revenue.”
+“Right land” parameter sensitivities:
+$A^{\max}_{s,\text{prime}}$: if we set this to 0 (no prime farmland), and if our site had, say, 50% prime, then we could only use non-prime portion for solar. If that non-prime portion was less than 49% of total, farmland rule might not even bind because prime cap becomes stricter. We can mention if not using prime means maybe only 30% of land could be solar even though farmland rule would allow 49%. This results in less solar and overall lower NPV. If prime farmland protection is prioritized, it can significantly reduce solar extent on good farms.
+$\text{slope}_{\max}$: if we allowed steeper slopes, maybe more area could be used on a hilly site. If lowered, maybe some area can’t be used. If site mostly flat, no effect.
+$D_{\max}$ (distance): if a site was borderline far, maybe viability stops if beyond threshold (spent too much on line).
+Hosting capacity $H(p)$: if one parcel had low capacity, maybe we choose another parcel if available. Without multi-parcel selection, not directly applicable. If we had two possible feeders, we could do interesting analysis of splitting the project – but beyond current scope.
+Subsidy parameters:
+If $\eta_{\text{ITC}}=0.30$ (only base ITC, assume project did not qualify for adders, maybe due to not meeting domestic content or it’s not in an energy community), then initial CAPEX cost to developer is higher by factor (pay 100% instead of 50% of cost). That likely makes NPV <0 at previously high lease; they’d only afford lower lease. We’d see $L_{\text{solar}}^*$ drop considerably, maybe around half if that was binding. Possibly some marginal acres become not worth it, but farmland rule probably still limiting anyway, so they might still do max acres but just pay less rent.
+If $\eta_{\text{ITC}}=0.60$ (if there was an extra 10% for being in e.g. low-income via adders like if qualifies for those bonus credits), then developer cost lower -> can pay more (though we capped at 50% target in our assumption, but if allowed to 60, we could try that).
+If we set any of $y_{\text{PWA}},y_{\text{DC}},y_{\text{EC}}=0$ individually:
+If $y_{\text{PWA}}=0$, base ITC drops to 6% (IRA rule: if wage/apprenticeship not met, credit is one-fifth). That would be catastrophic for NPV – the developer would lose 24% of capex in credits. Likely then cannot pay anywhere near as much lease. We’d find maybe no viable solution at $L_{\min}=500$ unless power price was high. So following those rules is basically a must for economics.
+If $y_{\text{DC}}=0$ or $y_{\text{EC}}=0$, then ITC 50%->40% or 40%. That’s less severe but still 10% difference in upfront cost.
+The model could choose to not meet domestic content if domestic content raised cost by >10% which might not be worth the 10% credit. But we didn’t model cost increase for DC content. If we did, one could test breakpoints. Usually, 10% credit on a $1/W system = $0.10/W. If using domestic raises cost by $0.05/W, it’s worth it still. If it raised by $0.15/W, then maybe not. But currently domestic content premium might be small due to supply diversifying, so likely they will meet it to get the credit.
+If site was not an energy community, that 10% might be lost unless they relocated or did something else. That just lowers ITC to 40%. The project might still be viable but with slightly lower rent (maybe ~10% lower).
+Re-solving and comparing: For each of these perturbations, the model would be re-run and we’d compare key outputs:
+$L_{\text{solar}}^*$ changes (higher or lower),
+$A_s$ chosen (maybe unchanged if farmland rule still binding, or reduced if viability shrinks),
+whether a different constraint becomes binding (like if we raise power price, maybe farmland 51% remains binding, but if we remove farmland rule then likely something like interconnect becomes binding),
+how farmer and developer NPV shift:
+If $L$ goes up, farmer NPV increases, developer stays at break-even (just transferring more value).
+If $A_s$ goes up, combined more solar means more total value created (since solar presumably yields more profit than crops – otherwise they wouldn’t do it).
+If a constraint like zoning cap becomes active, that becomes the limit in scenario vs farmland in base etc.
+We would summarize, for example:
+Higher sell price or additional subsidy → solar more attractive → maximum solar (49% land) still used, but rent increases (e.g. from $800 to $1100/acre) until hitting the $1200 cap. Developer still break-even, farmer captures more value. If allowed, maybe even ask to amend farmland agreement to use more land if it were possible because economics strong.
+Lower sell price or no adders → rent $L$ falls (maybe to $500 min or below viability) and possibly solar acreage might even drop if not worth using full allowed land (if each additional acre barely break-even, might still do to maximize farmer benefit because developer is okay at break-even per acre – actually developer wouldn’t mind building even at break-even per acre as long as NPV≥0, so they would still fill to farmland max if at exactly break-even per acre. If truly negative beyond certain size, then we’d see optimal $A_s$ smaller to keep NPV=0 margin). Possibly if price too low, no solar at all.
+Strict prime farmland protection → less solar acres (only non-prime used, e.g. 30% land), so farmer gets less lease overall. Possibly prime remains in crops which yields less profit than solar would have, so total benefit lower. The binding constraint shifts from farmland 51% to prime cap if it’s stricter.
+Zoning cap or interconnect cap lower than 49% → solar acres limited by those first, leaving more ag land unused or just farmed, so again lower total profit vs base scenario.
+No farmland-pres requirement (e.g. opted out of PA 116) → then constraint 7.7 removed, so the model would probably allocate 100% to solar (assuming it’s most profitable) if allowed by other constraints. Farmer would then become essentially a solar site lessors, no farming. They’d lose PA 116 credits though; if those are small relative to solar rent, they are likely better off. We can quantify: if 100 acres all solar, at $800/ac-year 25 years -> big money vs the PA 116 credit maybe $5-10/ac-year, trivial in comparison plus one-time penalty maybe $50k or so. So financially would favor opting out if allowed to build that much solar. But policywise, state wants to avoid that, hence the rules.
+We can mention that outcome to show the impact of policy.
+Net-metering scenario (small project): If we had a scenario where only a 0.5 MW (maybe 4 acres) is built to offset farm usage at retail rate (19c), the economics would be way different (very good since saving retail cost). But net-metering has size caps. If the farm’s load only justifies 100 kW, then 100 kW on say 1 acre is used at 19c, beyond that any production would be sold maybe at lower rate or not allowed. That might not align with our large-scale linear programming approach easily. It’s a different use-case (behind-the-meter vs independent power producer).
+But we can at least qualitatively say: if the farm instead used some solar to offset its own usage at retail, that portion is far more valuable, but limited by their demand (maybe a few tens of kW, which is negligible compared to field scale). The model could incorporate that by splitting $P_{\text{NM}}$ and $P_{\text{export}}$. If we did, likely we’d always fill the net-metering cap first (because those kWh worth 19c vs 5c selling). So if farm peak is 50 kW, they'd do 50 kW of solar for themselves, and any beyond that is at wholesale. But 50 kW uses maybe 0.3 acres – tiny relative to 100 acres available. So it doesn’t change land allocation; it just ensures first 0.3 acre’s worth of power goes to offset usage, which the model would do if we allowed it, because it’s free benefit.
+Perturb “right land” parameters:
+If allowed to use some nonfarmland (say they own adjacent brownfield), the model would likely use that first since maybe using nonfarmland doesn’t trigger 51% requirement. If we had a separate category that doesn’t need to preserve farmland, they might put as much solar as possible on nonfarmland area. But since we had $A_{s,\text{nonfarmland}}=0$ forced, we skip that scenario. But could mention: if the farm had some marginal non-ag land (like a corner that is not prime farmland or not under PA 116), that would be ideal to use for solar as it doesn’t count against their 51% calculation. The model would certainly use such acres first if present.
+Another scenario: if the state redefines certain solar uses as still “agricultural use” (some have floated agrivoltaics could count as ag use if e.g. animals graze under or they grow something significant under panels). If that happened, effectively $A_s$ (or part of it) could also count in $A_{\text{ag}}$. If, say, half of solar acres are dual-use with grazing, maybe we could count some fraction as still ag. That would relax the 51% requirement effectively, allowing more solar without breaching it. The model would then allow more $A_s$ because effectively it doesn’t all subtract from $A_{\text{ag}}$. E.g., if they said pollinator habitat counts as ag (one could argue it doesn’t produce anything marketable, so probably not; grazing sheep might count as producing livestock, possibly yes if they sell wool or meat).
+If we allowed $A_{\text{ag}} = A_c + \beta A_s$ with some $\beta>0$ for dual-use (like if grazing counts fully, $\beta=1$; if not, $\beta=0$ as now), then the 51% rule becomes $A_c + \beta A_s \ge 0.51 A_{\text{tot}}$. If $\beta=1$ (i.e. solar acres are also all ag via grazing), then constraint becomes $A_c + A_s \ge 0.51 A_{\text{tot}}$. Combined with land constraint $A_c + A_s \le A_{\text{tot}}$, the range of feasible changes. If $A_s$ had been limited to 49% because $\beta=0$, now $\beta=1$ might allow $A_s$ to go up to 100% as long as $A_c$ is 0 because then $A_s = 100%$ gives LHS $0 + 1*100% = 100% \ge 51%$ satisfied. So in that extreme, they could do entire farm solar and claim because they graze sheep, it's still agriculture, thus fulfilling program.
+So yes, if agrivoltaics got official recognition as ag use, farmland-preservation program might not restrict solar much at all. Then optimal solution would be use all land for solar (since presumably the animal/grazing income is small relative to solar but enough to count as use).
+That scenario basically nullifies 51% rule. We can mention that as a potential regulatory change and its impact (massive increase in solar potential on farmland).
+Perturb other constraints:
+If we had ROI or DSCR constraints (which we didn’t enforce), but say if developer insisted on, e.g., IRR 8% rather than just break-even 5%, that would be like requiring NPV ≥ some positive number (makes it harder to pay high rent). If we linearized that as, e.g., NPV ≥ X% of CAPEX (like requiring positive NPV ratio), we could simulate: basically developer would pay less rent to achieve their target profit. Then $L_{\text{solar}}$ optimum would be lower. The farmer gets less, developer keeps some profit. We can discuss that qualitatively: in real negotiations, developer might not actually give all profit to landowner (they aim for some IRR). Our model giving them break-even is a theoretical max landowner could demand if developer just at threshold. If developer needed, say, $N profit, that could be set and then $L$ would come out lower. So farmland owner might not actually get $L_{\max}$ from Stage A if developer had pricing power or alternatives. But if farmland owners have strong bargaining and many developers bidding, perhaps they can push it to near break-even levels.
+If DSCR minimum was added, that might limit how much debt they can raise if rent is high (because high rent = low cash flow cushion). If DSCR<1, project couldn’t get financed. If our solution had borderline DSCR (maybe if we gave them any profit, likely DSCR fine because NPV=0 at 5% discount implies around 1.0 average DSCR maybe; typically lenders want >1.2, so developer might actually want some cushion -> again needing lower rent).
+Could mention: “If financing constraints require, e.g., 20% project NPV margin, the lease would need to be set lower such that developer retains some profit. This would shift some value from landowner back to developer to satisfy lenders. The model could incorporate that by setting $\text{NPV}{\min}$ to a positive value or adding a DSCR constraint. The effect would be to reduce $L{\text{solar}}$ and possibly reduce solar acreage if viability is borderline. Essentially, landowner’s maximum rent is somewhat theoretical – in practice developer will ensure a safety margin, meaning actual negotiated lease might be lower than the absolute max found here.”
+We’d provide scenario comparison perhaps in a table:
+e.g.
+Base case: $L^*=$800, A_s=49 ac (4.9 MW), farmer NPV $X, developer NPV $0 (IRR 5%)
+High price scenario: $L^*=$1200 (cap), A_s=49 ac, farmer NPV higher, developer still break-even (or slight positive because cap prevented going higher).
+Low price scenario: no solar (not viable at minimum rent).
+etc.
+Focus on interesting ones: farmland rule off, prime farmland avoid, etc.
+11. Output generation
+The final outputs we would present to the user or in a report include:
+Optimal decision variables:
+$L_{\text{solar}}^*$ (the annual lease payment per acre the model determined).
+$A_s^*$ (acres of solar) and breakdown by type if needed (though we have one type of solar).
+$P_{\text{PV}}^*$ (capacity in MW).
+$A_{c,j}^*$ for each crop. Possibly aggregate if one crop chosen.
+Possibly $A_{s,\text{prime}}^*$ (just to report how many prime acres were used, to show compliance with any cap or just interesting).
+$A_{\text{ag}}^$ (should equal $A_c^$ in our case, which likely = 0.51 $A_{\text{tot}}$).
+Constraint slacks:
+We list critical resources and whether they fully used or not:
+Land: e.g. “Land constraint: all 100 acres are utilized ($A_s + A_c = 100$).” Or if not, “Only 90 of 100 acres are used (10 left fallow) due to [reason].”
+Farmland-preservation: “Exactly 51 acres (51%) remain in ag use, satisfying the minimum requirement with equality (binding).”
+Capital: “Upfront budget $X used of $Y available (e.g. not binding if X<Y).”
+Operating budget: “Not binding, operating costs $A << OpCap $B.”
+Labor: “Not binding, labor used Y hrs vs L_max Z hrs available.”
+Zoning cap: mention if it was or wasn’t binding.
+Interconnect capacity: mention if we hit the cap or had slack (like “project uses 4.9 MW of the 5 MW available, leaving 0.1 MW unused – essentially binding” or “only 3 MW used out of 5 MW available (not fully utilized because farmland rule cut off further expansion).”
+If any geometry or prime restrictions are binding: e.g. “Prime farmland cap was set to 0 acres – this was binding and prevented using 20 prime acres that would otherwise have gone to solar; these remain in crops.”
+etc.
+This gives insight which factors limit the project: policy (51% rule), physical (grid cap), or economic (NPV).
+Financial results:
+Cash flow summary or at least key metrics:
+Developer: NPV (which we set ~0), IRR (should equal discount ~5% if exactly 0 NPV, meaning project just meets hurdle; if slack maybe IRR slightly higher).
+Farmer: annual lease income = $L_{\text{solar}} \times A_s$ (we can compute that e.g. $800 * 49 = $39,200/year), crop income on remaining acres maybe e.g. $51 ac * $600/acre = $30,600/year gross, net maybe minus costs e.g. $15k net if profit half of gross). So total farmer net income = lease + crop profit (like $39k + $15k = $54k/year, vs before with 100 acres of crops maybe it was $30k net, so nearly doubled income with solar).
+Farmer NPV over T: discount those flows, etc.
+Possibly mention how much of farmer’s income comes from solar vs crops now (e.g. majority from solar lease).
+We might mention the farmer loses tax credits (if that’s the case) but those might have been only e.g. $5/acre * 100 = $500/yr, so trivial compared to gained lease revenue.
+If they extended the PA 116, they avoid paying back maybe $X of past credits, so that’s good (we should mention that fulfilling all those conditions means no penalties, they just don’t get credit during solar but it resumes after extended term).
+Developer metrics: initial investment needed (e.g. $ per MW breakdown), maybe cost per acre or per MW totals to show money flows. E.g. “Project size 4.9 MW, upfront cost $1.16/W_dc ~ $1.5/W_ac (with tracking and upgrades, ~$7.35M total). 50% ITC = $3.675M, so net $3.675M cost to developer. With annual revenues ~$X and expenses ~$Y including lease, the project achieves NPV ~0 at 5% discount.” This gives confidence that it’s financially just viable.
+IRR if interesting (maybe around 6% if slight slack).
+Payback: “Developer recoups initial investment by year e.g. 12 (cumulative net cash flow turns positive after inverter replacement).” If NPV=0 at 5%, payback might be near end of project, maybe salvage pushes it over positive at end.
+BCR for combined project: maybe mention if combined (farmer+developer ignoring transfer) yields e.g. BCR ~1.3 (if solar yields good returns on capital at 0 cost of land, etc.). But since we forced break-even, combined maybe equal to salvage effect or something. Not too critical.
+“Retail vs sell price” display:
+We explicitly note: “Note: The model uses a wholesale energy price of $X/kWh for solar revenue. The retail rate of $0.19/kWh mentioned is shown only as a reference for typical consumer electricity cost. The project does not earn 19¢/kWh; it earns the lower sell price (e.g. via a PPA or utility tariff). This distinction is important: using the high retail price in the revenue calculations would significantly overestimate project profits and thus allowable lease – our model correctly avoids that.”
+This satisfies that requirement from the guidelines, making sure the user sees we didn't use 0.19 in the actual revenue (just referenced it).
+Scenario comparisons: Summarize at least verbally how outcomes change:
+“If the power price were, say, 50% higher, the developer could afford to pay the maximum rent ($1200/acre-year) and would still develop on the maximum allowed acreage (49 acres). The farmer’s annual lease income would jump to $58,800 in that case. Conversely, if the power price were much lower, the project might not be viable at even $500/acre rent – the farmer would then stick to farming all the land.”
+“If the 51% agricultural use rule did not apply (e.g. land not enrolled in PA 116), the optimal solution would allocate all 100 acres to solar, dramatically increasing the farmer’s lease income but removing crop production entirely. However, current rules prevent this scenario unless the owner exits the PA 116 program and incurs penalties.”
+“If local zoning further limited solar to 20 acres, then only 20 acres would be used for solar (with those 20 acres still achieving a high rent per acre); this significantly reduces the farm’s total income from the project relative to the state-allowed maximum.”
+“If prime farmland use was prohibited for solar, in this case X acres of prime soil would remain in crops, and only the remaining Y acres were used for solar, lowering overall solar capacity and income. This shows the trade-off between preserving prime agricultural land and maximizing renewable energy output.”
+etc., to highlight policy impacts.
+All results presented in a clear format with headings, bullet points for key points, maybe a small table or two (the guidelines said bullet or numbered lists are fine; we can embed a small table if needed but likely just describe).

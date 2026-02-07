@@ -73,20 +73,13 @@ docker compose logs -f api
 docker compose down
 ```
 
-### Site-prep pricing snapshot (offline)
+### Site-prep pricing snapshot (static)
 
-When a farm is created (`POST /api/farms`), the backend loads site-prep pricing inputs from the checked-in data files under `backend/data/prices/`:
-- `msu-dollar-lines.txt` — MSU Extension custom work rates (per-acre operations)
-- `mdot-allitems-mi-siteprep-v4.csv` — MDOT weighted-average bid items (earthwork, removals, etc.)
+The backend uses static pricing snapshots stored in the database for site preparation cost calculations. Pricing data includes:
+- MSU Extension custom work rates (per-acre operations)
+- MDOT weighted-average bid items (earthwork, removals, etc.)
 
-Run the refresh helper anytime the source files change:
-
-```powershell
-Set-Location -Path O:\N\OptimizationTool\backend
-npm run pricing:refresh
-```
-
-The script parses the local files, stores a pricing snapshot in Postgres, and the backend serves those values without contacting external services.
+Pricing snapshots are loaded during database initialization and remain static. The system no longer supports live pricing updates from external sources.
 
 ## Land Cover Tables (Database)
 

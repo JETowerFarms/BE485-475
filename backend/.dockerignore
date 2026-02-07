@@ -2,6 +2,7 @@ node_modules
 npm-debug.log
 .env
 .env.local
+.env.example
 .git
 .gitignore
 *.md
@@ -17,3 +18,14 @@ Thumbs.db
 *~
 test-setup.js
 .editorconfig
+Datasets/
+__tests__/
+scripts/
+data/
+*.test.js
+*.spec.js
+coverage/
+.nyc_output/
+.cache/
+dist/
+build/

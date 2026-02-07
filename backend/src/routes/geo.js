@@ -9,9 +9,14 @@ const path = require('path');
 router.get('/michigan-mcd', async (req, res, next) => {
   try {
     const mcdPath = path.join(__dirname, '../../data/michiganMCDFull.json');
-    const mcdData = JSON.parse(fs.readFileSync(mcdPath, 'utf8'));
-    
-    res.json(mcdData);
+    const stat = fs.statSync(mcdPath);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Encoding', 'identity');
+
+    const stream = fs.createReadStream(mcdPath);
+    stream.on('error', next);
+    stream.pipe(res);
   } catch (error) {
     next(error);
   }

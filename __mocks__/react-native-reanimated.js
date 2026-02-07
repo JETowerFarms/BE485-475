@@ -1,0 +1,22 @@
+// Mock for react-native-reanimated
+export const runOnJS = (fn) => fn;
+export const runOnUI = (fn) => fn;
+export const interpolate = jest.fn((value, inputRange, outputRange) => value);
+export const useSharedValue = (initial) => ({ value: initial });
+export const useAnimatedStyle = (updater) => updater();
+export const withTiming = (value) => value;
+export const withSpring = (value) => value;
+export const useAnimatedScrollHandler = () => ({});
+export const useAnimatedRef = () => ({ current: null });
+export const cancelAnimation = () => {};
+export const measure = () => ({});
+export const scrollTo = () => {};
+export const setNativeProps = () => {};
+export const useDerivedValue = (fn) => ({ value: fn() });
+export const useAnimatedReaction = () => {};
+export const startMapper = () => {};
+export const stopMapper = () => {};
+export const makeMutable = (value) => ({ value });
+export const makeShareable = (value) => value;
+export const isSharedValue = () => false;
+export const getViewProp = () => null;

@@ -1,22 +1,6 @@
 // Michigan Counties Data
 // Auto-generated from US Census Bureau GeoJSON data
 
-export const DISTRICTS = {
-  7: ['Genesee', 'Lapeer', 'Sanilac', 'St. Clair', 'Huron', 'Tuscola'],
-  8: ['Saginaw', 'Bay', 'Midland', 'Gratiot', 'Isabella', 'Clare', 'Gladwin', 'Arenac'],
-  13: ['Livingston', 'Shiawassee', 'Clinton', 'Ingham', 'Eaton']
-};
-
-// Helper function to check if a county is in target districts
-export const isTargetCounty = (countyName) => {
-  const allTargetCounties = [
-    ...DISTRICTS[7],
-    ...DISTRICTS[8],
-    ...DISTRICTS[13]
-  ];
-  return allTargetCounties.includes(countyName);
-};
-
 export const MICHIGAN_COUNTIES = [
   {
     "id": "26001",

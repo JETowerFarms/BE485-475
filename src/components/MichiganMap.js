@@ -31,12 +31,13 @@ const COLORS = {
   shadow: 'rgba(0,0,0,0.15)',
 };
 
-// Four-color palette for map coloring (muted, professional tones)
+// Five-color palette for map coloring (muted, professional tones)
 const MAP_COLORS = [
   '#E8D4B8', // Warm beige
-  '#C5D5C5', // Sage green  
+  '#C5D5C5', // Sage green 
+  '#D4BCBC', // Muted rose
+  '#B8C8D8', // Light blue-gray 
   '#D4C4B0', // Tan
-  '#B8C8D8', // Light blue-gray
 ];
 
 const MIN_SCALE = 1;
@@ -79,14 +80,14 @@ const COUNTY_POLYGONS = MICHIGAN_COUNTIES.map(county => ({
 }));
 
 // Check if two points are close enough to be considered shared vertices
-const pointsClose = (p1, p2, tolerance = 2) => {
+const pointsClose = (p1, p2, tolerance = 1) => {
   return Math.abs(p1.x - p2.x) < tolerance && Math.abs(p1.y - p2.y) < tolerance;
 };
 
 // Check if two polygons share an edge (adjacent)
 const polygonsAdjacent = (poly1, poly2) => {
   // Build a set of points from poly2 for faster lookup
-  const tolerance = 2;
+  const tolerance = 1;
   const pointSet = new Set();
   for (const p2 of poly2) {
     // Round coordinates to tolerance precision for comparison
@@ -122,11 +123,14 @@ const buildAdjacencyList = (counties) => {
   return adjacency;
 };
 
-// Greedy graph coloring algorithm
+// Greedy graph coloring algorithm with Welsh-Powell ordering
 const assignColors = (counties, adjacency, numColors) => {
   const colorMap = {};
   
-  for (const county of counties) {
+  // Sort counties by number of neighbors (most constrained first - Welsh-Powell algorithm)
+  const sortedCounties = [...counties].sort((a, b) => adjacency[b.name].length - adjacency[a.name].length);
+  
+  for (const county of sortedCounties) {
     // Find colors used by adjacent counties
     const usedColors = new Set();
     for (const neighbor of adjacency[county.name]) {
@@ -136,11 +140,18 @@ const assignColors = (counties, adjacency, numColors) => {
     }
     
     // Assign first available color
+    let assigned = false;
     for (let c = 0; c < numColors; c++) {
       if (!usedColors.has(c)) {
         colorMap[county.name] = c;
+        assigned = true;
         break;
       }
+    }
+    
+    // Fail if all colors used (shouldn't happen with 5 colors on planar graph)
+    if (!assigned) {
+      throw new Error(`Cannot assign color to county ${county.name}: all ${numColors} colors used by neighbors ${Array.from(usedColors)}`);
     }
   }
   
@@ -150,6 +161,21 @@ const assignColors = (counties, adjacency, numColors) => {
 // Pre-compute county colors (only runs once at module load)
 const COUNTY_ADJACENCY = buildAdjacencyList(COUNTY_POLYGONS);
 const COUNTY_COLOR_MAP = assignColors(COUNTY_POLYGONS, COUNTY_ADJACENCY, MAP_COLORS.length);
+
+// Validation: ensure no adjacent counties have the same color
+const validateColoring = (counties, adjacency, colorMap) => {
+  for (const county of counties) {
+    const color = colorMap[county.name];
+    for (const neighbor of adjacency[county.name]) {
+      if (colorMap[neighbor] === color) {
+        throw new Error(`Coloring validation failed: ${county.name} and ${neighbor} both have color ${color}`);
+      }
+    }
+  }
+};
+
+// Validate the coloring
+validateColoring(COUNTY_POLYGONS, COUNTY_ADJACENCY, COUNTY_COLOR_MAP);
 
 // Find which county contains the given point (in SVG coordinates)
 const findCountyAtPoint = (svgX, svgY) => {
@@ -577,7 +603,10 @@ const MichiganMap = ({
   const isSelected = (name) => selectedCounty === name;
   const getFill = (county) => {
     if (isSelected(county.name)) return COLORS.selectedFill;
-    const colorIndex = COUNTY_COLOR_MAP[county.name] ?? 0;
+    const colorIndex = COUNTY_COLOR_MAP[county.name];
+    if (colorIndex === undefined) {
+      throw new Error(`County ${county.name} has no assigned color`);
+    }
     return MAP_COLORS[colorIndex];
   };
   const getStroke = (county) => isSelected(county.name) ? COLORS.selectedStroke : COLORS.defaultStroke;
@@ -694,7 +723,7 @@ const MichiganMap = ({
             ]}
           >
             <View style={styles.shadowContainer}>
-              <Svg width={MAP_WIDTH} height={MAP_HEIGHT} viewBox="0 0 400 500">
+              <Svg width={MAP_WIDTH} height={MAP_HEIGHT} viewBox="0 0 400 500" pointerEvents="none">
                 <G transform="translate(6, 6)">
                   {MICHIGAN_COUNTIES.map((county) => (
                     <Path
@@ -712,6 +741,7 @@ const MichiganMap = ({
               height={MAP_HEIGHT}
               viewBox="0 0 400 500"
               style={styles.map}
+              pointerEvents="none"
             >
               <G>
                 {MICHIGAN_COUNTIES.map((county) => (
