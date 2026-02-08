@@ -211,7 +211,10 @@ class LandConstraints:
     interconnect_capacity_mw: Optional[float] = None
 
     def usable_land(self) -> float:
-        usable = self.total_land * (1 - self.setback_fraction) - self.easement_acres - self.wetland_exclusion_acres
+        """Max land available for solar: at most (1 - min_ag_fraction) of crop_land, reduced by setbacks."""
+        crop_land = self.total_land - self.easement_acres - self.wetland_exclusion_acres
+        max_solar_share = crop_land * (1.0 - self.min_ag_fraction)
+        usable = max_solar_share * (1.0 - self.setback_fraction)
         return max(0.0, usable)
 
 
@@ -264,23 +267,26 @@ def compute_solar_pv_no_lease(solar: SolarParameters, econ: EconomicParameters) 
     return pv_revenue, pv_cost, pv_net
 
 
-def compute_lease_rate(solar: SolarParameters, econ: EconomicParameters, lease: LeaseParameters) -> float:
+def compute_lease_rate(
+    solar: SolarParameters,
+    econ: EconomicParameters,
+    lease: LeaseParameters,
+    developer_retention_fraction: float = 0.12,
+) -> float:
     """
-    Determine the solar lease rate ($ per acre-year) that keeps developer NPV ≥ 12% of pre-lease NPV.
-    The developer must retain at least 12% of the project's economic value after lease payments.
-    Bounds are optional and can be None.
+    Determine the solar lease rate ($ per acre-year) that keeps developer NPV >= developer_retention_fraction
+    of the pre-lease NPV. Bounds are optional and can be None.
     """
     _, _, pv_net_no_lease = compute_solar_pv_no_lease(solar, econ)
     pv_factor_lease = lease.pv_factor(econ)
     if pv_factor_lease == 0:
         raise ValueError("Discount factor sum is zero; check discount rate and project life.")
 
-    # Developer retention constraint: retain at least 12% of pre-lease NPV
-    # Maximum lease PV that can be extracted: 88% of pre-lease NPV
-    max_lease_pv = 0.88 * pv_net_no_lease
+    retained_frac = developer_retention_fraction if developer_retention_fraction is not None else 0.12
+    retained_frac = max(0.0, min(1.0, retained_frac))
+    max_lease_pv = (1.0 - retained_frac) * pv_net_no_lease
     derived_L = max_lease_pv / pv_factor_lease if pv_net_no_lease > 0 else 0.0
 
-    # Apply optional bounds
     L_star = derived_L
     if lease.min_rate is not None:
         L_star = max(lease.min_rate, L_star)
@@ -406,6 +412,8 @@ def optimize_land_allocation(
         "A_s": A_s_opt,
         "A_c_by_crop": {crop.name: A_c_opts[i] for i, crop in enumerate(crops)},
         "pv_lease_per_acre": pv_lease_per_acre,
+        "lease_annual_per_acre": L_solar,
+        "lease_monthly_per_acre": L_solar / 12.0,
         "pv_crop_per_acre": {crop.name: pv_crop_per_acre[i] for i, crop in enumerate(crops)},
         "pv_solar_net_per_acre_after_lease": solar_pv_after_lease,
         "pv_solar_net_per_acre_no_lease": solar_pv_no_lease,
@@ -424,6 +432,7 @@ def main(
     pvwatts_data: Optional[Dict[str, Any]] = None,
     output_json: bool = False,
     crop_data: Optional[List[Dict[str, Any]]] = None,
+    model_config: Optional[Dict[str, Any]] = None,
 ):
     """
     Run the agrivoltaics optimization model for the specified crops.
@@ -436,7 +445,16 @@ def main(
         output_json: If True, output results as JSON; otherwise, print detailed results
     """
     import json
+    cfg = model_config or {}
+
+    def pick(key: str, default):
+        val = cfg.get(key)
+        return default if val is None else val
+
+    model_name = cfg.get('name') or 'Default'
+
     print(f"[Python] Main function called with acres={acres}, crop_names='{crop_names}', output_json={output_json}")
+    print(f"[Python] Using model: {model_name}")
     print(f"[Python] PVWatts data source: {'file' if pvwatts_response_path else 'inline data'}")
 
     # Parse crop names (comma-separated)
@@ -465,36 +483,36 @@ def main(
 
     # Economic parameters
     econ = EconomicParameters(
-        discount_rate=0.08,  # 8% real discount rate
-        inflation_rate=0.02,  # 2% (not used for real calculations)
-        electricity_escalation=0.02,  # 2% escalation for electricity price
-        crop_escalation=0.00,  # retained for backward compatibility (unused)
-        project_life=27,  # 2 construction years + 25 operating years
+        discount_rate=pick('discount_rate', 0.08),
+        inflation_rate=pick('inflation_rate', 0.02),
+        electricity_escalation=pick('electricity_escalation', 0.02),
+        crop_escalation=pick('crop_escalation', 0.00),
+        project_life=int(pick('project_life', 27)),
     )
 
     # Base solar parameters (excluding capacity_factor which comes from PVWatts)
     base_solar_params = {
-        'land_intensity_acres_per_MW': 5.5,
-        'degradation_rate': 0.005,  # 0.5% per year degradation
-        'installed_cost_per_MW': 1_610_000.0,  # $1.61/WAC => $/MWac
-        'site_prep_cost_per_acre': 36_800.0,
-        'grading_cost_per_acre': 8_286.0,  # median of 5,524–11,048
-        'retilling_cost_per_acre': 950.0,  # $950/acre for field retilling
-        'interconnection_fraction': 0.30,  # 30% of construction for upgrades
-        'bond_cost_per_acre': 10_000.0,
-        'vegetation_cost_per_acre': 225.0,
-        'insurance_cost_per_acre': 100.0,
-        'oandm_cost_per_kw': 11.0,
-        'replacement_cost_per_MW': 100_000.0,  # assume $0.10/W
-        'replacement_year': 14,  # Year 14 in 27-year timeline (was year 12 in 25-year)
-        'decommission_cost_per_kw': 400.0,
-        'remediation_cost_per_acre': 2_580.0,
-        'salvage_value_per_acre': 12_500.0,
+        'land_intensity_acres_per_MW': pick('land_intensity_acres_per_MW', 5.5),
+        'degradation_rate': pick('degradation_rate', 0.005),
+        'installed_cost_per_MW': pick('installed_cost_per_MW', 1_610_000.0),
+        'site_prep_cost_per_acre': pick('site_prep_cost_per_acre', 36_800.0),
+        'grading_cost_per_acre': pick('grading_cost_per_acre', 8_286.0),
+        'retilling_cost_per_acre': pick('retilling_cost_per_acre', 950.0),
+        'interconnection_fraction': pick('interconnection_fraction', 0.30),
+        'bond_cost_per_acre': pick('bond_cost_per_acre', 10_000.0),
+        'vegetation_cost_per_acre': pick('vegetation_cost_per_acre', 225.0),
+        'insurance_cost_per_acre': pick('insurance_cost_per_acre', 100.0),
+        'oandm_cost_per_kw': pick('oandm_cost_per_kw', 11.0),
+        'replacement_cost_per_MW': pick('replacement_cost_per_MW', 100_000.0),
+        'replacement_year': int(pick('replacement_year', 14)),
+        'decommission_cost_per_kw': pick('decommission_cost_per_kw', 400.0),
+        'remediation_cost_per_acre': pick('remediation_cost_per_acre', 2_580.0),
+        'salvage_value_per_acre': pick('salvage_value_per_acre', 12_500.0),
         'itc_rate': 0.50,
         'electricity_price_0': 0.08,
-        'availability_factor': 0.98,
-        'curtailment_factor': 0.95,
-        'export_factor': 1.0,
+        'availability_factor': pick('availability_factor', 0.98),
+        'curtailment_factor': pick('curtailment_factor', 0.95),
+        'export_factor': pick('export_factor', 1.0),
     }
 
     # All crop parameters
@@ -692,27 +710,30 @@ def main(
             solar = create_solar_parameters_from_pvwatts(pvwatts_response, scenario_solar_params)
 
             lease = LeaseParameters(
-                # No min or max rate bounds - lease rate determined purely by economics
-                escalation_rate=0.0,
+                min_rate=pick('lease_min_rate', None),
+                max_rate=pick('lease_max_rate', None),
+                escalation_rate=pick('lease_escalation_rate', 0.0),
             )
 
             farmer = FarmerParameters(
-                pa116_credit_per_acre=0.0,
+                pa116_credit_per_acre=pick('farmer_pa116_credit_per_acre', 0.0),
             )
 
+            developer_retention_fraction = pick('developer_retention_fraction', 0.12)
+
             # Stage 1: compute lease rate
-            L_solar = compute_lease_rate(solar, econ, lease)
+            L_solar = compute_lease_rate(solar, econ, lease, developer_retention_fraction)
 
             # Stage 2: optimize land allocation
             constraints = LandConstraints(
                 total_land=acres,
-                min_ag_fraction=0.51,
-                max_prime_solar=40.0,
-                zoning_max_solar=40.0,
-                setback_fraction=0.10,
-                easement_acres=0.0,
-                wetland_exclusion_acres=0.0,
-                interconnect_capacity_mw=10.0,
+                min_ag_fraction=pick('constraints_min_ag_fraction', 0.51),
+                max_prime_solar=pick('constraints_max_prime_solar', 40.0),
+                zoning_max_solar=pick('constraints_zoning_max_solar', 40.0),
+                setback_fraction=pick('constraints_setback_fraction', 0.10),
+                easement_acres=pick('constraints_easement_acres', 0.0),
+                wetland_exclusion_acres=pick('constraints_wetland_exclusion_acres', 0.0),
+                interconnect_capacity_mw=pick('constraints_interconnect_capacity_mw', 10.0),
             )
 
             result = optimize_land_allocation(
@@ -759,12 +780,12 @@ def main(
                 print()
                 print(f"Derived solar lease rate (L_solar): ${L_solar:,.2f} per acre-year")
                 print()
-                print("Developer retention constraint (12% minimum):")
+                print(f"Developer retention constraint ({developer_retention_fraction:.2%} minimum):")
                 pv_net_no_lease = result['pv_solar_net_per_acre_no_lease']
-                developer_retained_pv = 0.12 * pv_net_no_lease
+                developer_retained_pv = developer_retention_fraction * pv_net_no_lease
                 developer_after_lease_pv = pv_net_no_lease - result['pv_lease_per_acre']
                 print(f"  Pre-lease solar NPV per acre: ${pv_net_no_lease:,.2f}")
-                print(f"  Developer minimum retained NPV per acre (12%): ${developer_retained_pv:,.2f}")
+                print(f"  Developer minimum retained NPV per acre ({developer_retention_fraction:.2%}): ${developer_retained_pv:,.2f}")
                 print(f"  Developer NPV after lease per acre: ${developer_after_lease_pv:,.2f}")
                 print(f"  Lease PV to farmer per acre: ${result['pv_lease_per_acre']:,.2f}")
                 print()
@@ -804,6 +825,7 @@ if __name__ == "__main__":
     parser.add_argument('--crop-data', dest='crop_data', type=str, help='JSON array of crop parameter objects')
     parser.add_argument('--data', type=str, required=True, help='PVWatts JSON payload (string)')
     parser.add_argument('--json', action='store_true', help='Output JSON only')
+    parser.add_argument('--model-config', dest='model_config', type=str, help='JSON payload of model parameter overrides')
     args = parser.parse_args()
 
     try:
@@ -820,6 +842,14 @@ if __name__ == "__main__":
             print(f"[Python] ERROR: Invalid crop_data JSON: {exc}")
             sys.exit(1)
 
+    model_config_json = None
+    if args.model_config:
+        try:
+            model_config_json = json.loads(args.model_config)
+        except json.JSONDecodeError as exc:
+            print(f"[Python] ERROR: Invalid model_config JSON: {exc}")
+            sys.exit(1)
+
     if not args.crops and not crop_data_json:
         print("[Python] ERROR: Provide at least --crops or --crop-data")
         sys.exit(1)
@@ -831,6 +861,7 @@ if __name__ == "__main__":
         pvwatts_data=pvwatts_data,
         output_json=args.json,
         crop_data=crop_data_json,
+        model_config=model_config_json,
     )
 
     if args.json:

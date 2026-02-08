@@ -8,6 +8,9 @@ import HomeScreen from './src/screens/HomeScreen';
 import CitySelectionScreen from './src/screens/CitySelectionScreen';
 import MapScreen from './src/screens/MapScreen';
 import FarmDescriptionScreen from './src/screens/FarmDescriptionScreen';
+import LinearOptimizationScreen from './src/screens/LinearOptimizationScreen';
+import ModelEditorScreen from './src/screens/ModelEditorScreen';
+import LoginScreen from './src/screens/LoginScreen';
 // import TestPathRendering from './TestPathRendering'; // Uncomment to test
 
 // Set to true to show the test component
@@ -17,6 +20,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState('home');
   const [selectedCounty, setSelectedCounty] = useState(null);
   const [selectedCity, setSelectedCity] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [farms, setFarms] = useState([]);
   const [isLoadingFarms, setIsLoadingFarms] = useState(true);
   const [mcdData, setMcdData] = useState(null);
@@ -123,9 +127,24 @@ export default function App() {
     updateFarms(updatedFarms);
   };
 
-  const handleNavigateToNextForm = (farmDescription) => {
-    // TODO: Store farm description and navigate to next form
-    console.log('Farm description:', farmDescription);
+  const handleNavigateToNextForm = (updatedFarms) => {
+    if (Array.isArray(updatedFarms)) {
+      updateFarms(updatedFarms);
+    }
+    setCurrentScreen('linearOptimization');
+  };
+
+  const handleBackToFarmDescription = () => {
+    setCurrentScreen('farmDescription');
+  };
+
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    setCurrentScreen('home');
+  };
+
+  const handleNavigateToModelEditor = () => {
+    setCurrentScreen('modelEditor');
   };
 
   // Uncomment below to test path rendering directly
@@ -135,15 +154,16 @@ export default function App() {
     <SafeAreaProvider>
       <View style={{ flex: 1 }}>
         <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-        {currentScreen === 'home' && (
+        {!currentUser ? (
+          <LoginScreen onLoginSuccess={handleLoginSuccess} />
+        ) : currentScreen === 'home' ? (
           <HomeScreen 
             onNavigateToCity={handleNavigateToCity}
             savedLocation={savedLocation}
             isLoadingInitial={isLoadingSavedLocation || isLoadingFarms}
             onResumeSavedLocation={handleResumeSavedLocation}
           />
-        )}
-        {currentScreen === 'citySelection' && selectedCounty && (
+        ) : currentScreen === 'citySelection' && selectedCounty ? (
           <CitySelectionScreen 
             county={selectedCounty}
             mcdData={mcdData}
@@ -151,8 +171,7 @@ export default function App() {
             onNavigateBack={handleBackToHome}
             onNavigateToPin={(city) => handleNavigateToPin(selectedCounty, city)}
           />
-        )}
-        {currentScreen === 'map' && selectedCounty && selectedCity && (
+        ) : currentScreen === 'map' && selectedCounty && selectedCity ? (
           <MapScreen
             county={selectedCounty}
             city={selectedCity}
@@ -163,8 +182,7 @@ export default function App() {
             onNavigateNext={handleNavigateToFarmDescription}
             onFarmsUpdate={updateFarms}
           />
-        )}
-        {currentScreen === 'farmDescription' && selectedCounty && selectedCity && (
+        ) : currentScreen === 'farmDescription' && selectedCounty && selectedCity ? (
           <FarmDescriptionScreen
             farms={farms}
             county={selectedCounty}
@@ -172,8 +190,18 @@ export default function App() {
             onNavigateBack={handleBackToMap}
             onNavigateNext={handleNavigateToNextForm}
             onFarmsUpdate={updateFarms}
+            onOpenModelEditor={handleNavigateToModelEditor}
           />
-        )}
+        ) : currentScreen === 'linearOptimization' ? (
+          <LinearOptimizationScreen
+            farms={farms}
+            onBack={handleBackToFarmDescription}
+          />
+        ) : currentScreen === 'modelEditor' ? (
+          <ModelEditorScreen
+            onBack={handleBackToFarmDescription}
+          />
+        ) : null}
       </View>
     </SafeAreaProvider>
   );
