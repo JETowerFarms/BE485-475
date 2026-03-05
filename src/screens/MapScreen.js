@@ -560,7 +560,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
                 throw new Error('Invalid farm geometry: not enough points to analyze');
               }
 
-              const payload = { coordinates };
+              const payload = { coordinates, userId: 'default-user' };
               console.log('Analyze request payload:', JSON.stringify(payload, null, 2));
 
               const response = await fetch(buildApiUrl('/reports/analyze'), {
@@ -685,30 +685,107 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
     );
   };
 
-  // Update farm name
-  const handleFarmNameChange = () => {
+  // Update farm name (backend + local)
+  const handleFarmNameChange = async () => {
     if (!selectedFarm || !editingFarmName.trim()) return;
-    
+
+    const farmId = selectedFarm.id;
+    const newName = editingFarmName.trim();
+    const previousName = selectedFarm.properties?.name || '';
+
+    if (newName === previousName) return;
+
+    // Optimistic local update
     setFarms(currentFarms => currentFarms.map(f => {
-      if (f.id === selectedFarm.id) {
+      if (f.id === farmId) {
         return {
           ...f,
           properties: {
             ...f.properties,
-            name: editingFarmName.trim(),
+            name: newName,
           },
         };
       }
       return f;
     }));
-    
-    setSelectedFarm(prev => ({
+
+    setSelectedFarm(prev => (prev ? {
       ...prev,
       properties: {
         ...prev.properties,
-        name: editingFarmName.trim(),
+        name: newName,
       },
-    }));
+    } : prev));
+
+    try {
+      const response = await fetch(buildApiUrl(`/farms/${farmId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'default-user', name: newName }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Backend error (${response.status}): ${errorText}`);
+      }
+
+      const payload = await response.json();
+      const syncedName = payload?.data?.name || newName;
+      const updatedAt = payload?.data?.updatedAt;
+
+      setFarms(currentFarms => currentFarms.map(f => {
+        if (f.id === farmId) {
+          return {
+            ...f,
+            properties: {
+              ...f.properties,
+              name: syncedName,
+              updatedAt: updatedAt || f.properties?.updatedAt,
+            },
+          };
+        }
+        return f;
+      }));
+
+      setSelectedFarm(prev => (prev ? {
+        ...prev,
+        properties: {
+          ...prev.properties,
+          name: syncedName,
+          updatedAt: updatedAt || prev.properties?.updatedAt,
+        },
+      } : prev));
+    } catch (error) {
+      console.warn('Failed to update farm name on backend:', error);
+      showError(
+        'Rename Failed',
+        'Could not update farm name on server. Please try again.'
+      );
+
+      setEditingFarmName(previousName);
+
+      // Roll back optimistic update
+      setFarms(currentFarms => currentFarms.map(f => {
+        if (f.id === farmId) {
+          return {
+            ...f,
+            properties: {
+              ...f.properties,
+              name: previousName,
+            },
+          };
+        }
+        return f;
+      }));
+
+      setSelectedFarm(prev => (prev ? {
+        ...prev,
+        properties: {
+          ...prev.properties,
+          name: previousName,
+        },
+      } : prev));
+    }
   };
 
   // Get pins for a specific farm

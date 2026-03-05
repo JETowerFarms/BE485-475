@@ -14,12 +14,50 @@ const { queryElevationDataForPoints } = require('../utils/elevationDataGrabber')
 const { setTotalPoints: setElevationTotalPoints, getResults: getElevationResults } = require('../utils/elevationHeatMapParser');
 const { queryClearingCostDataForPoints, getExpectedValues, getAllPricingSnapshots } = require('../utils/clearingCostDataGrabber');
 
+// Per-user queue manager: each user gets two lanes so their jobs don't collide with other users.
+const userQueues = new Map();
+
+// Global mutex to serialize access to the solar suitability parser (native module with shared state).
+let solarLock = Promise.resolve();
+
+function withSolarLock(fn) {
+  const next = solarLock.then(fn);
+  // Keep the chain alive regardless of outcome to avoid breaking future jobs.
+  solarLock = next.catch(() => undefined);
+  return next;
+}
+
+function getUserQueueState(userId) {
+  if (!userQueues.has(userId)) {
+    userQueues.set(userId, { lanes: [Promise.resolve(), Promise.resolve()], next: 0 });
+  }
+  return userQueues.get(userId);
+}
+
+function enqueueForUser(userId, jobFn) {
+  const state = getUserQueueState(userId);
+  const laneIndex = state.next;
+  state.next = (state.next + 1) % state.lanes.length;
+
+  const lane = state.lanes[laneIndex];
+  const nextPromise = lane.then(() => jobFn());
+
+  // Keep lane alive regardless of job outcome.
+  state.lanes[laneIndex] = nextPromise.catch(() => undefined);
+
+  return nextPromise;
+}
+
+// NREL PVWatts API Key — set NREL_API_KEY in .env
+const NREL_API_KEY = process.env.NREL_API_KEY;
+
 // Validation schema for analyze endpoint
 const analyzeFarmSchema = Joi.object({
   coordinates: Joi.array()
     .items(Joi.array().length(2).items(Joi.number()))
     .min(3)
     .required(),
+  userId: Joi.string().allow('', null),
 });
 
 // Farm resolution configuration
@@ -48,6 +86,10 @@ function isLikelyLatLngMichigan(coordinates) {
     return lat >= 40 && lat <= 50 && lng >= -90 && lng <= -80;
   });
   return hits.length >= Math.ceil(coordinates.length * 0.75);
+}
+
+function getUserId(reqBody = {}, reqQuery = {}, reqHeaders = {}) {
+  return reqBody.userId || reqQuery.userId || reqHeaders['x-user-id'] || 'anonymous';
 }
 
 function closePolygonRing(coordinates) {
@@ -311,6 +353,9 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
     const medianSuitability = computeMedian(overallScores);
     const trimmedMeanSuitability = computeTrimmedMean(overallScores, 0.1);
     const insideMedianSuitability = computeMedian(insideScores);
+    const insideMeanSuitability = insideScores.length
+      ? insideScores.reduce((sum, value) => sum + value, 0) / insideScores.length
+      : 0;
 
     return {
       success: true,
@@ -325,12 +370,12 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
         gridPointCount: counts.gridPointCount ?? gridPoints.length,
         boundaryPointCount: counts.boundaryPointCount ?? coordinates.length,
         totalSamplePoints: coordinatePairs.length,
-        aggregationMethod: 'median',
+        aggregationMethod: 'mean',
         timestamp: new Date().toISOString()
       },
       summary: {
         ...parserResult.summary,
-        averageSuitability: Math.round(insideMedianSuitability * 100) / 100,
+        averageSuitability: Math.round(insideMeanSuitability * 100) / 100,
         medianSuitability: Math.round(medianSuitability * 100) / 100,
         trimmedMeanSuitability: Math.round(trimmedMeanSuitability * 100) / 100
       },
@@ -761,66 +806,58 @@ function buildDynamicClearingCosts({ clearingData, msuRates, mdotItems, expected
   };
 }
 
-// POST /api/reports/analyze
-// Analyze solar suitability for farm coordinates
-router.post('/analyze', async (req, res, next) => {
+async function executeAnalysis(value) {
   try {
     const startTime = Date.now();
-
-    // Fast fail: Validate request immediately
-    const { error, value } = analyzeFarmSchema.validate(req.body);
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        error: 'FAST FAIL: Validation Error',
-        message: error.details[0].message,
-        timestamp: new Date().toISOString()
-      });
-    }
-
     const { coordinates } = value;
 
-    // Fast fail: Calculate area and check farm size limit
     const farmAreaAcres = calculateFarmArea(coordinates);
     const MAX_FARM_ACRES = 1000;
 
     if (farmAreaAcres > MAX_FARM_ACRES) {
-      return res.status(400).json({
-        success: false,
-        error: 'FAST FAIL: Farm Too Large',
-        message: `Farm area of ${farmAreaAcres.toFixed(1)} acres exceeds the maximum allowed size of ${MAX_FARM_ACRES} acres. Please break your farm into smaller sections and analyze them separately.`,
-        farmArea: farmAreaAcres,
-        maxAllowedArea: MAX_FARM_ACRES,
-        timestamp: new Date().toISOString()
-      });
+      return {
+        status: 400,
+        payload: {
+          success: false,
+          error: 'FAST FAIL: Farm Too Large',
+          message: `Farm area of ${farmAreaAcres.toFixed(1)} acres exceeds the maximum allowed size of ${MAX_FARM_ACRES} acres. Please break your farm into smaller sections and analyze them separately.`,
+          farmArea: farmAreaAcres,
+          maxAllowedArea: MAX_FARM_ACRES,
+          timestamp: new Date().toISOString(),
+        },
+      };
     }
 
-    // Generate shared grid once for all parsers
     const { ring, gridPoints, coordinatePairs, gridPointCount, boundaryPointCount } = buildGridPoints(coordinates);
 
-    // Run solar suitability analysis
-    const solarReport = await generateSolarReportFromGrid(coordinates, ring, gridPoints, coordinatePairs, { gridPointCount, boundaryPointCount });
+    const solarReport = await withSolarLock(() =>
+      generateSolarReportFromGrid(coordinates, ring, gridPoints, coordinatePairs, { gridPointCount, boundaryPointCount })
+    );
     if (!solarReport.success) {
-      return res.status(500).json({
-        success: false,
-        error: 'FAST FAIL: Solar Analysis Failed',
-        message: solarReport.error,
-        metadata: solarReport.metadata
-      });
+      return {
+        status: 500,
+        payload: {
+          success: false,
+          error: 'FAST FAIL: Solar Analysis Failed',
+          message: solarReport.error,
+          metadata: solarReport.metadata,
+        },
+      };
     }
 
-    // Run elevation heatmap analysis
     const elevationReport = await generateElevationReportFromGrid(coordinates, gridPoints, coordinatePairs);
     if (!elevationReport.success) {
-      return res.status(500).json({
-        success: false,
-        error: 'FAST FAIL: Elevation Analysis Failed',
-        message: elevationReport.error,
-        metadata: elevationReport.metadata
-      });
+      return {
+        status: 500,
+        payload: {
+          success: false,
+          error: 'FAST FAIL: Elevation Analysis Failed',
+          message: elevationReport.error,
+          metadata: elevationReport.metadata,
+        },
+      };
     }
 
-    // Run clearing cost analysis
     const clearingCostReport = await generateClearingCostReportFromGrid(
       coordinates,
       gridPoints,
@@ -828,17 +865,19 @@ router.post('/analyze', async (req, res, next) => {
       farmAreaAcres
     );
     if (!clearingCostReport.success) {
-      return res.status(500).json({
-        success: false,
-        error: 'FAST FAIL: Clearing Cost Analysis Failed',
-        message: clearingCostReport.error,
-        metadata: clearingCostReport.metadata
-      });
+      return {
+        status: 500,
+        payload: {
+          success: false,
+          error: 'FAST FAIL: Clearing Cost Analysis Failed',
+          message: clearingCostReport.error,
+          metadata: clearingCostReport.metadata,
+        },
+      };
     }
 
     const processingTimeMs = Date.now() - startTime;
 
-    // Return the report with organized sections
     const responsePayload = {
       success: true,
       metadata: {
@@ -851,37 +890,68 @@ router.post('/analyze', async (req, res, next) => {
         },
         ...solarReport.metadata,
         processingTimeMs,
-        farmAreaAcres: Math.round(farmAreaAcres * 100) / 100
+        farmAreaAcres: Math.round(farmAreaAcres * 100) / 100,
       },
       solarSuitability: {
         summary: solarReport.summary,
         results: solarReport.results,
-        metadata: solarReport.metadata
+        metadata: solarReport.metadata,
       },
       elevation: {
         summary: elevationReport.summary,
         results: elevationReport.results,
-        metadata: elevationReport.metadata
+        metadata: elevationReport.metadata,
       },
       clearingCost: {
         summary: clearingCostReport.summary,
         results: clearingCostReport.results,
         equations: clearingCostReport.equations,
         expectedValues: clearingCostReport.expectedValues,
-        metadata: clearingCostReport.metadata
-      }
+        metadata: clearingCostReport.metadata,
+      },
     };
 
-    res.set('Content-Type', 'application/json');
-    res.send(JSON.stringify(responsePayload, null, 2));
-
+    return { status: 200, payload: responsePayload };
   } catch (error) {
     console.error('FAST FAIL: Unexpected error in analyze endpoint:', error);
+    return {
+      status: 500,
+      payload: {
+        success: false,
+        error: 'FAST FAIL: Internal Server Error',
+        message: error.message,
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
+}
+
+// POST /api/reports/analyze
+// Analyze solar suitability for farm coordinates
+router.post('/analyze', async (req, res) => {
+  // Fast fail: Validate request immediately
+  const { error, value } = analyzeFarmSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: 'FAST FAIL: Validation Error',
+      message: error.details[0].message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  const userId = getUserId(req.body, req.query, req.headers);
+
+  try {
+    const result = await enqueueForUser(userId, () => executeAnalysis(value));
+    res.status(result.status).json(result.payload);
+  } catch (error) {
+    console.error('FAST FAIL: Queue execution error:', error);
     res.status(500).json({
       success: false,
       error: 'FAST FAIL: Internal Server Error',
       message: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 });

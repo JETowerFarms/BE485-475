@@ -1,3 +1,17 @@
+  const arrayTypeOptions = [
+    { value: '0', label: 'Fixed Open Rack' },
+    { value: '1', label: 'Fixed Roof Mounted' },
+    { value: '2', label: '1-Axis' },
+    { value: '3', label: '1-Axis Backtracking' },
+    { value: '4', label: '2-Axis' },
+  ];
+
+  const moduleTypeOptions = [
+    { value: '0', label: 'Standard' },
+    { value: '1', label: 'Premium' },
+    { value: '2', label: 'Thin Film' },
+  ];
+
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
@@ -5,6 +19,8 @@ import {
   StyleSheet,
   StatusBar,
   Pressable,
+  Modal,
+  Alert,
   Platform,
   Image,
   TextInput,
@@ -14,6 +30,7 @@ import {
   Dimensions,
   ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Polygon, Image as SvgImage, ClipPath, Defs, Rect, Pattern, Path, LinearGradient, Stop } from 'react-native-svg';
 import Carousel from 'react-native-reanimated-carousel';
@@ -66,6 +83,8 @@ const COLORS = {
 
 const DRAWER_WIDTH = Dimensions.get('window').width * 0.75;
 const MAX_GRID_POINTS = 25000;
+// Feature flag: hide site-prep report in satellite modal without deleting logic
+const SHOW_SITE_PREP_REPORT = false;
 
 const toCoordKey = (coord) => {
   if (!coord) return 'na';
@@ -360,26 +379,9 @@ const normalizePolygon = (coordinates, size) => {
   }
   
   if (coords.length < 3) return '';
-  
-  // Calculate centroid
-  let centroidX = 0, centroidY = 0;
-  coords.forEach(([lng, lat]) => {
-    centroidX += lng;
-    centroidY += lat;
-  });
-  centroidX /= coords.length;
-  centroidY /= coords.length;
-  
-  // Sort coordinates by angle from centroid to form a proper polygon
-  const sortedCoords = [...coords].sort((a, b) => {
-    const angleA = Math.atan2(a[1] - centroidY, a[0] - centroidX);
-    const angleB = Math.atan2(b[1] - centroidY, b[0] - centroidX);
-    return angleA - angleB;
-  });
-  
-  // Get bounds
+  // Get bounds using the original winding to preserve concave shapes
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  sortedCoords.forEach(([lng, lat]) => {
+  coords.forEach(([lng, lat]) => {
     minX = Math.min(minX, lng);
     maxX = Math.max(maxX, lng);
     minY = Math.min(minY, lat);
@@ -396,7 +398,8 @@ const normalizePolygon = (coordinates, size) => {
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
   
-  return sortedCoords.map(([lng, lat]) => {
+  // Preserve input vertex order so concave polygons render correctly
+  return coords.map(([lng, lat]) => {
     const x = padding + (lng - cx) * scale + availableSize / 2;
     const y = padding + (cy - lat) * scale + availableSize / 2; // Flip Y for screen coords
     return `${x},${y}`;
@@ -447,6 +450,17 @@ const calculatePolygonArea = (coordinates) => {
   const sqMiles = area / 2589988.110336; // 1 sq mile = 2589988.110336 sq meters
   
   return { acres, sqMiles };
+};
+
+const computeCentroidLatLng = (coordinates) => {
+  if (!Array.isArray(coordinates) || coordinates.length === 0) return { lat: 0, lon: 0 };
+  let sumLat = 0;
+  let sumLon = 0;
+  coordinates.forEach(([lng, lat]) => {
+    sumLat += lat;
+    sumLon += lng;
+  });
+  return { lat: sumLat / coordinates.length, lon: sumLon / coordinates.length };
 };
 
 // Farm polygon colors
@@ -533,7 +547,7 @@ const VIEW_TYPES = [
   },
 ];
 
-const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigateNext, onFarmsUpdate }) => {
+const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigateNext, onFarmsUpdate, onOpenModelEditor }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
   const carouselRef = useRef(null);
@@ -600,6 +614,33 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   // rotationByFarmId[farmId] = { cropIds: number[] }
   const [rotationByFarmId, setRotationByFarmId] = useState({});
   const [rotationDraftByFarmId, setRotationDraftByFarmId] = useState({});
+  const emptyCropForm = {
+    id: null,
+    name: '',
+    category: '',
+    unit: '',
+    yield_per_acre: '',
+    price_per_unit_0: '',
+    cost_per_acre: '',
+    escalation_rate: '',
+  };
+  const [cropEditorVisible, setCropEditorVisible] = useState(false);
+  const [cropEditorMode, setCropEditorMode] = useState('create');
+  const [cropForm, setCropForm] = useState(emptyCropForm);
+  const [cropEditorError, setCropEditorError] = useState('');
+  const [cropEditorSaving, setCropEditorSaving] = useState(false);
+  const CONFIG_STORAGE_KEY = '@farm_form_configs';
+  const [configModalVisible, setConfigModalVisible] = useState(false);
+  const [configName, setConfigName] = useState('');
+  const [savedConfigs, setSavedConfigs] = useState([]);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configError, setConfigError] = useState('');
+  const [models, setModels] = useState([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState('');
+  const [modelPickerVisible, setModelPickerVisible] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState(null);
+  const [selectedModel, setSelectedModel] = useState(null);
 
   // Other form fields (restored)
   const [farmType, setFarmType] = useState('');
@@ -609,7 +650,19 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [irrigationType, setIrrigationType] = useState('');
   const [notes, setNotes] = useState('');
 
-  const isFormValid = selectedFarmIds.length > 0 && siteIncludes !== '';
+  // PVWatts / optimization inputs per-farm (all required, no defaults)
+  const emptyPvInputs = { kwPerAcre: '', tilt: '', azimuth: '', arrayType: '', moduleType: '', losses: '' };
+  const [pvInputsByFarmId, setPvInputsByFarmId] = useState({});
+  const [pvDraftByFarmId, setPvDraftByFarmId] = useState({});
+  const [pvFarmId, setPvFarmId] = useState(null);
+  const [pvFarmDropdownOpen, setPvFarmDropdownOpen] = useState(false);
+  const [arrayTypeDropdownOpen, setArrayTypeDropdownOpen] = useState(false);
+  const [moduleTypeDropdownOpen, setModuleTypeDropdownOpen] = useState(false);
+
+  const [submitError, setSubmitError] = useState('');
+  const [submitLoading, setSubmitLoading] = useState(false);
+
+  const isFormValid = selectedFarmIds.length > 0 && (siteIncludes === 'farming' || siteIncludes === 'neither');
 
   const toggleFarmSelection = (farmId) => {
     setSelectedFarmIds(prev => 
@@ -623,15 +676,22 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     setSiteIncludes(option);
   };
 
-  // Keep rotationFarmId pointed at a selected farm
+  // Keep rotationFarmId and pvFarmId pointed at selected farms
   useEffect(() => {
     if (selectedFarmIds.length === 0) {
       setRotationFarmId(null);
+      setPvFarmId(null);
       return;
     }
-    if (rotationFarmId && selectedFarmIds.includes(rotationFarmId)) return;
-    setRotationFarmId(selectedFarmIds[0]);
-  }, [selectedFarmIds, rotationFarmId]);
+
+    if (!rotationFarmId || !selectedFarmIds.includes(rotationFarmId)) {
+      setRotationFarmId(selectedFarmIds[0]);
+    }
+
+    if (!pvFarmId || !selectedFarmIds.includes(pvFarmId)) {
+      setPvFarmId(selectedFarmIds[0]);
+    }
+  }, [selectedFarmIds, rotationFarmId, pvFarmId]);
 
   // Seed draft state from saved state when changing selected rotation farm
   useEffect(() => {
@@ -645,6 +705,19 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       };
     });
   }, [rotationFarmId, rotationByFarmId]);
+
+  // Seed PV draft state from saved state when changing selected PV farm
+  useEffect(() => {
+    if (!pvFarmId) return;
+    setPvDraftByFarmId((prev) => {
+      if (prev[pvFarmId]) return prev;
+      const saved = pvInputsByFarmId?.[pvFarmId];
+      return {
+        ...prev,
+        [pvFarmId]: { ...(saved || emptyPvInputs) },
+      };
+    });
+  }, [pvFarmId, pvInputsByFarmId]);
 
   // Load crop options (for searchable dropdown)
   useEffect(() => {
@@ -683,6 +756,9 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const rotationDraft = rotationFarmId ? rotationDraftByFarmId?.[rotationFarmId] : null;
   const rotationDraftCropIds = Array.isArray(rotationDraft?.cropIds) ? rotationDraft.cropIds : [];
 
+  const pvDraft = pvFarmId ? pvDraftByFarmId?.[pvFarmId] : null;
+  const pvDraftInputs = pvDraft || emptyPvInputs;
+
   const toggleRotationCrop = useCallback((cropId) => {
     if (!rotationFarmId) return;
 
@@ -715,6 +791,22 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     }));
   }, [rotationFarmId, rotationDraftCropIds]);
 
+  const setPvDraftField = (field, value) => {
+    if (!pvFarmId) return;
+    setPvDraftByFarmId((prev) => ({
+      ...prev,
+      [pvFarmId]: { ...(prev[pvFarmId] || emptyPvInputs), [field]: value },
+    }));
+  };
+
+  const savePvForCurrentFarm = useCallback(() => {
+    if (!pvFarmId) return;
+    setPvInputsByFarmId((prev) => ({
+      ...prev,
+      [pvFarmId]: { ...(pvDraftByFarmId?.[pvFarmId] || emptyPvInputs) },
+    }));
+  }, [pvFarmId, pvDraftByFarmId, emptyPvInputs]);
+
   const filteredCropOptions = useMemo(() => {
     const term = rotationSearch.trim().toLowerCase();
     if (!term) return cropOptions;
@@ -725,6 +817,333 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       return name.includes(term) || crop.includes(term) || category.includes(term);
     });
   }, [cropOptions, rotationSearch]);
+
+  const resetCropForm = () => {
+    setCropForm({ ...emptyCropForm });
+    setCropEditorMode('create');
+    setCropEditorError('');
+  };
+
+  const startNewCrop = () => {
+    resetCropForm();
+    setCropEditorVisible(true);
+  };
+
+  const startEditCrop = (crop) => {
+    if (!crop) return;
+    setCropEditorMode('edit');
+    setCropForm({
+      id: crop.id ?? null,
+      name: crop.name || crop.crop || '',
+      category: crop.category || '',
+      unit: crop.unit || '',
+      yield_per_acre: crop.yield_per_acre !== null && crop.yield_per_acre !== undefined ? String(crop.yield_per_acre) : '',
+      price_per_unit_0: crop.price_per_unit_0 !== null && crop.price_per_unit_0 !== undefined ? String(crop.price_per_unit_0) : '',
+      cost_per_acre: crop.cost_per_acre !== null && crop.cost_per_acre !== undefined ? String(crop.cost_per_acre) : '',
+      escalation_rate: crop.escalation_rate !== null && crop.escalation_rate !== undefined ? String(crop.escalation_rate) : '',
+    });
+    setCropEditorError('');
+    setCropEditorVisible(true);
+  };
+
+  const closeCropEditor = () => {
+    setCropEditorVisible(false);
+    resetCropForm();
+  };
+
+  const applyCropUpdate = (updatedCrop) => {
+    setCropOptions((prev) => {
+      const filtered = prev.filter((c) => c?.id !== updatedCrop?.id);
+      const next = [...filtered, updatedCrop];
+      next.sort((a, b) => String(a?.name || a?.crop || '').localeCompare(String(b?.name || b?.crop || '')));
+      return next;
+    });
+  };
+
+  const removeCropFromRotations = useCallback((cropId) => {
+    setRotationDraftByFarmId((prev) => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([farmId, data]) => {
+        const ids = Array.isArray(data?.cropIds) ? data.cropIds.filter((id) => id !== cropId) : [];
+        next[farmId] = { cropIds: ids };
+      });
+      return next;
+    });
+
+    setRotationByFarmId((prev) => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([farmId, data]) => {
+        const ids = Array.isArray(data?.cropIds) ? data.cropIds.filter((id) => id !== cropId) : [];
+        next[farmId] = { cropIds: ids };
+      });
+      return next;
+    });
+  }, []);
+
+  const buildCropPayloadFromForm = () => {
+    const errs = [];
+    const name = cropForm.name.trim();
+    const unit = cropForm.unit.trim();
+    if (!name) errs.push('Name is required');
+    if (!unit) errs.push('Unit is required');
+
+    const parseNumberField = (value, label, { allowEmpty = false } = {}) => {
+      if (value === '' || value === null || value === undefined) {
+        if (allowEmpty) return null;
+        errs.push(`${label} is required`);
+        return null;
+      }
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        errs.push(`${label} must be a number`);
+        return null;
+      }
+      return num;
+    };
+
+    const payload = {
+      name,
+      crop: name,
+      category: cropForm.category.trim() || null,
+      unit,
+      yield_per_acre: parseNumberField(cropForm.yield_per_acre, 'yield_per_acre'),
+      price_per_unit_0: parseNumberField(cropForm.price_per_unit_0, 'price_per_unit_0'),
+      cost_per_acre: parseNumberField(cropForm.cost_per_acre, 'cost_per_acre'),
+      escalation_rate: parseNumberField(cropForm.escalation_rate, 'escalation_rate', { allowEmpty: true }) ?? 0,
+    };
+
+    return { errs, payload };
+  };
+
+  const saveCropFromForm = async () => {
+    setCropEditorError('');
+    const { errs, payload } = buildCropPayloadFromForm();
+    if (errs.length) {
+      setCropEditorError(errs.join('; '));
+      return;
+    }
+
+    const isEdit = cropEditorMode === 'edit' && cropForm.id;
+    setCropEditorSaving(true);
+    try {
+      const response = await fetch(
+        buildApiUrl(isEdit ? `/crops/${cropForm.id}` : '/crops'),
+        {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = data?.details?.join('; ') || data?.message || response.statusText;
+        throw new Error(detail || 'Failed to save crop');
+      }
+
+      applyCropUpdate(data);
+      setCropEditorVisible(false);
+      resetCropForm();
+    } catch (err) {
+      setCropEditorError(err?.message || 'Failed to save crop');
+    } finally {
+      setCropEditorSaving(false);
+    }
+  };
+
+  const deleteCropById = async (cropId) => {
+    setCropEditorError('');
+    setCropEditorSaving(true);
+    try {
+      const response = await fetch(buildApiUrl(`/crops/${cropId}`), { method: 'DELETE' });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to delete crop');
+      }
+
+      setCropOptions((prev) => prev.filter((c) => c?.id !== cropId));
+      removeCropFromRotations(cropId);
+        if (cropForm.id === cropId) {
+          resetCropForm();
+        }
+    } catch (err) {
+      setCropEditorError(err?.message || 'Failed to delete crop');
+    } finally {
+      setCropEditorSaving(false);
+    }
+  };
+
+  const confirmDeleteCrop = (crop) => {
+    if (!crop?.id) return;
+    Alert.alert(
+      'Delete crop',
+      `Are you sure you want to delete "${crop.name || crop.crop}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteCropById(crop.id) },
+      ],
+    );
+  };
+
+  const formatNumber = (value) => {
+    if (value === null || value === undefined || value === '') return '—';
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toLocaleString(undefined, { maximumFractionDigits: 4 }) : String(value);
+  };
+
+  const loadSavedConfigs = useCallback(async () => {
+    setConfigLoading(true);
+    setConfigError('');
+    try {
+      const raw = await AsyncStorage.getItem(CONFIG_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setSavedConfigs(Array.isArray(parsed) ? parsed : []);
+    } catch (err) {
+      setConfigError(err?.message || 'Failed to load saved configurations');
+    } finally {
+      setConfigLoading(false);
+    }
+  }, [CONFIG_STORAGE_KEY]);
+
+  useEffect(() => {
+    loadSavedConfigs();
+  }, [loadSavedConfigs]);
+
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
+    setModelsError('');
+    try {
+      const resp = await fetch(buildApiUrl('/models'));
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `Failed to load models (${resp.status})`);
+      }
+      const data = await resp.json();
+      const list = Array.isArray(data?.models) ? data.models : [];
+      setModels(list);
+    } catch (err) {
+      setModelsError(err?.message || 'Failed to load models');
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
+
+  // Keep selected model aligned with fetched list without overwriting user choice.
+  useEffect(() => {
+    if (!models || models.length === 0) {
+      setSelectedModel(null);
+      setSelectedModelId(null);
+      return;
+    }
+
+    // If user already picked a model and it still exists, keep it.
+    if (selectedModelId) {
+      const preferred = models.find((m) => m.id === selectedModelId);
+      if (preferred) {
+        if (selectedModel?.id !== preferred.id) {
+          setSelectedModel(preferred);
+        }
+        return;
+      }
+      // If the chosen model disappeared from the list, leave the current selection untouched.
+      return;
+    }
+
+    // No prior selection: pick Default if present, else first model.
+    const fallback = models.find((m) => m.name === 'Default') || models[0] || null;
+    setSelectedModel(fallback);
+    setSelectedModelId(fallback ? fallback.id : null);
+  }, [models, selectedModelId, selectedModel]);
+
+  const buildConfigSnapshot = () => ({
+    selectedFarmIds,
+    siteIncludes,
+    rotationByFarmId,
+    rotationDraftByFarmId,
+    pvInputsByFarmId,
+    pvDraftByFarmId,
+    pvFarmId,
+    selectedModelId,
+    farmType,
+    acreage,
+    primaryCrops,
+    soilType,
+    irrigationType,
+    notes,
+  });
+
+  const applyConfigSnapshot = (snap) => {
+    setSelectedFarmIds(Array.isArray(snap?.selectedFarmIds) ? snap.selectedFarmIds : []);
+    setSiteIncludes(snap?.siteIncludes || '');
+    setRotationByFarmId(snap?.rotationByFarmId || {});
+    setRotationDraftByFarmId(snap?.rotationDraftByFarmId || {});
+    setPvInputsByFarmId(snap?.pvInputsByFarmId || {});
+    setPvDraftByFarmId(snap?.pvDraftByFarmId || {});
+    setPvFarmId(snap?.pvFarmId || (Array.isArray(snap?.selectedFarmIds) ? snap.selectedFarmIds[0] : null));
+    setSelectedModelId(snap?.selectedModelId || null);
+    setFarmType(snap?.farmType || '');
+    setAcreage(snap?.acreage || '');
+    setPrimaryCrops(snap?.primaryCrops || '');
+    setSoilType(snap?.soilType || '');
+    setIrrigationType(snap?.irrigationType || '');
+    setNotes(snap?.notes || '');
+  };
+
+  const saveCurrentConfig = async () => {
+    const name = configName.trim();
+    if (!name) {
+      setConfigError('Name is required to save configuration');
+      return;
+    }
+    const entry = {
+      id: Date.now(),
+      name,
+      savedAt: new Date().toISOString(),
+      snapshot: buildConfigSnapshot(),
+    };
+
+    try {
+      const existing = savedConfigs.filter((c) => c.name !== name);
+      const next = [entry, ...existing];
+      await AsyncStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(next));
+      setSavedConfigs(next);
+      setConfigName('');
+      setConfigError('');
+    } catch (err) {
+      setConfigError(err?.message || 'Failed to save configuration');
+    }
+  };
+
+  const loadConfig = async (config) => {
+    if (!config?.snapshot) return;
+    applyConfigSnapshot(config.snapshot);
+    setConfigModalVisible(false);
+  };
+
+  const deleteConfig = async (configId) => {
+    try {
+      const next = savedConfigs.filter((c) => c.id !== configId);
+      await AsyncStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(next));
+      setSavedConfigs(next);
+    } catch (err) {
+      setConfigError(err?.message || 'Failed to delete configuration');
+    }
+  };
+
+  const confirmDeleteConfig = (config) => {
+    Alert.alert(
+      'Delete saved configuration',
+      `Delete "${config?.name || 'Untitled'}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => deleteConfig(config.id) },
+      ],
+    );
+  };
 
   // Get or compute cached view data for a farm
   const getViewData = useCallback((farmId, coords, tileSize, viewTypeId, options = {}) => {
@@ -1062,7 +1481,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       const response = await fetch(buildApiUrl('/reports/analyze'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ coordinates }),
+        body: JSON.stringify({ coordinates, userId: 'default-user' }),
       });
 
       if (!response.ok) {
@@ -1098,9 +1517,9 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     }
   }, [updateFarmById]);
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    setSubmitError('');
     const effectiveRotationsByFarmId = { ...rotationByFarmId };
-    // Merge draft rotations for selected farms so the latest selections aren't dropped.
     selectedFarmIds.forEach((farmId) => {
       const draft = rotationDraftByFarmId?.[farmId];
       if (!draft) return;
@@ -1108,13 +1527,138 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       effectiveRotationsByFarmId[farmId] = { cropIds };
     });
 
-    const farmDescription = {
-      selectedFarmIds,
-      rotationsByFarmId: effectiveRotationsByFarmId,
-    };
+    const effectivePvByFarmId = { ...pvInputsByFarmId };
+    selectedFarmIds.forEach((farmId) => {
+      const draft = pvDraftByFarmId?.[farmId];
+      if (!draft) return;
+      effectivePvByFarmId[farmId] = { ...draft };
+    });
 
-    if (onNavigateNext) {
-      onNavigateNext(farmDescription);
+    if (!selectedFarmIds.length) {
+      setSubmitError('Select at least one farm.');
+      return;
+    }
+
+    if (siteIncludes !== 'farming' && siteIncludes !== 'neither') {
+      setSubmitError('Select "Farming" or "Neither" to provide PV system inputs.');
+      return;
+    }
+
+    const selectedFarms = builtFarms.filter((f) => selectedFarmIds.includes(f.id));
+    if (!selectedFarms.length) {
+      setSubmitError('Selected farms are missing.');
+      return;
+    }
+
+    const cropIdToName = new Map(
+      (cropOptions || []).map((c) => [c?.id ?? c?.crop_id ?? c?.name ?? c?.crop, c?.name || c?.crop || ''])
+    );
+
+    setSubmitLoading(true);
+    let updatedFarms = [...(farms || [])];
+
+    try {
+      for (const farm of selectedFarms) {
+        const rawCoordinates = farm?.geometry?.coordinates?.[0] || [];
+        const coordinates = rawCoordinates.length > 1 &&
+          rawCoordinates[0][0] === rawCoordinates[rawCoordinates.length - 1][0] &&
+          rawCoordinates[0][1] === rawCoordinates[rawCoordinates.length - 1][1]
+          ? rawCoordinates.slice(0, -1)
+          : rawCoordinates;
+
+        validateCoordinates(coordinates);
+
+        const area = calculatePolygonArea(coordinates).acres;
+        const centroid = computeCentroidLatLng(coordinates);
+        if (!area || area <= 0) {
+          throw new Error(`Unable to compute area for ${getFarmLabel(farm.id)}.`);
+        }
+
+        const pv = effectivePvByFarmId[farm.id];
+        if (!pv) {
+          throw new Error(`Enter PV inputs for ${getFarmLabel(farm.id)}.`);
+        }
+
+        const parsedKwPerAcre = Number(pv.kwPerAcre);
+        const parsedTilt = Number(pv.tilt);
+        const parsedAzimuth = Number(pv.azimuth);
+        const parsedArrayType = Number(pv.arrayType);
+        const parsedModuleType = Number(pv.moduleType);
+        const parsedLosses = Number(pv.losses);
+
+        if (!Number.isFinite(parsedKwPerAcre) || !Number.isFinite(parsedTilt) || !Number.isFinite(parsedAzimuth) ||
+            !Number.isFinite(parsedArrayType) || !Number.isFinite(parsedModuleType) || !Number.isFinite(parsedLosses)) {
+          throw new Error(`All PV parameters must be numbers for ${getFarmLabel(farm.id)}.`);
+        }
+
+        const cropIds = Array.isArray(effectiveRotationsByFarmId?.[farm.id]?.cropIds)
+          ? effectiveRotationsByFarmId[farm.id].cropIds
+          : [];
+
+        const cropNames = cropIds
+          .map((id) => cropIdToName.get(id) || '')
+          .filter((name) => name.trim().length > 0);
+
+        if (cropNames.length === 0) {
+          throw new Error(`Select at least one crop for ${getFarmLabel(farm.id)}.`);
+        }
+
+        const systemCapacity = area * parsedKwPerAcre; // kW per acre × acres = kW
+        if (!Number.isFinite(systemCapacity) || systemCapacity <= 0) {
+          throw new Error(`System capacity must be positive for ${getFarmLabel(farm.id)}.`);
+        }
+
+        const payload = {
+          farmId: farm.id,
+          geometry: farm.geometry,
+          acres: area,
+          crops: cropNames,
+          pvwatts: {
+            lat: centroid.lat,
+            lon: centroid.lon,
+            system_capacity: systemCapacity,
+            module_type: parsedModuleType,
+            array_type: parsedArrayType,
+            tilt: parsedTilt,
+            azimuth: parsedAzimuth,
+            losses: parsedLosses,
+          },
+          modelId: selectedModel?.id || null,
+          modelFlags: {},
+        };
+
+        const response = await fetch(buildApiUrl('/linear-optimization'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const text = await response.text();
+        if (!response.ok) {
+          throw new Error(text || `Request failed (${response.status}) for ${getFarmLabel(farm.id)}`);
+        }
+        const data = JSON.parse(text || '{}');
+
+        updatedFarms = updatedFarms.map((f) => {
+          if (f?.id !== payload.farmId) return f;
+          return {
+            ...f,
+            linearOptimization: data.optimization || null,
+            linearOptimizationLogs: data.logs || null,
+          };
+        });
+      }
+
+      if (onFarmsUpdate) {
+        onFarmsUpdate(updatedFarms);
+      }
+      if (onNavigateNext) {
+        onNavigateNext(updatedFarms);
+      }
+    } catch (err) {
+      setSubmitError(err?.message || 'Failed to run optimization');
+    } finally {
+      setSubmitLoading(false);
     }
   };
 
@@ -1148,6 +1692,37 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           showsVerticalScrollIndicator={true}
           persistentScrollbar={true}
         >
+          <Pressable
+            style={styles.rotationSaveButton}
+            onPress={() => {
+              setModelPickerVisible(true);
+              fetchModels();
+            }}
+          >
+            <Text style={styles.rotationSaveButtonText}>
+              {`Choose model: ${selectedModel?.name || 'Default'}`}
+            </Text>
+          </Pressable>
+          {modelsError ? <Text style={styles.errorText}>{modelsError}</Text> : null}
+
+          <Pressable
+            style={styles.rotationSaveButton}
+            onPress={onOpenModelEditor}
+          >
+            <Text style={styles.rotationSaveButtonText}>Open model editor</Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.rotationSaveButton}
+            onPress={() => {
+              setConfigModalVisible(true);
+              setConfigError('');
+              loadSavedConfigs();
+            }}
+          >
+            <Text style={styles.rotationSaveButtonText}>Save / Load configuration</Text>
+          </Pressable>
+
           {/* Select Farms */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Select Farm(s) *</Text>
@@ -1341,94 +1916,176 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 )}
 
                 <Pressable
-                  style={[styles.rotationSaveButton, !rotationFarmId && styles.nextButtonDisabled]}
-                  onPress={saveRotationForCurrentFarm}
-                  disabled={!rotationFarmId}
+                  style={styles.rotationSaveButton}
+                  onPress={startNewCrop}
                 >
-                  <Text style={styles.rotationSaveButtonText}>Save rotation for this farm</Text>
+                  <Text style={styles.rotationSaveButtonText}>Edit crop table</Text>
                 </Pressable>
               </View>
             </>
           )}
 
           {siteIncludes === 'grazing' && (
-            <>
-              {/* Grazing Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Grazing Type *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={farmType}
-                  onChangeText={setFarmType}
-                  placeholder="e.g., Rotational, Continuous, Intensive"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>future direction</Text>
+            </View>
+          )}
 
-              {/* Acreage */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Total Acreage</Text>
-                <TextInput
-                  style={styles.input}
-                  value={acreage}
-                  onChangeText={setAcreage}
-                  placeholder="Enter total acres"
-                  placeholderTextColor={COLORS.placeholder}
-                  keyboardType="numeric"
-                />
-              </View>
+          {(siteIncludes === 'farming' || siteIncludes === 'neither') && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>PV System Inputs (per farm)</Text>
 
-              {/* Livestock Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Livestock Type</Text>
-                <TextInput
-                  style={styles.input}
-                  value={primaryCrops}
-                  onChangeText={setPrimaryCrops}
-                  placeholder="e.g., Cattle, Sheep, Goats"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
+              <Text style={styles.subLabel}>Choose farm</Text>
+              <Pressable
+                style={[styles.dropdownButton, selectedFarmIds.length === 0 && styles.dropdownButtonDisabled]}
+                onPress={() => {
+                  if (selectedFarmIds.length === 0) return;
+                  setPvFarmDropdownOpen(!pvFarmDropdownOpen);
+                }}
+              >
+                <Text style={styles.dropdownButtonText}>
+                  {pvFarmId ? getFarmLabel(pvFarmId) : 'Select a farm...'}
+                </Text>
+                <Text style={styles.dropdownArrow}>{pvFarmDropdownOpen ? '▲' : '▼'}</Text>
+              </Pressable>
 
-              {/* Pasture Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Pasture Type</Text>
-                <TextInput
-                  style={styles.input}
-                  value={soilType}
-                  onChangeText={setSoilType}
-                  placeholder="e.g., Native, Improved, Mixed"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
+              {pvFarmDropdownOpen && (
+                <ScrollView style={styles.dropdownList} nestedScrollEnabled={true}>
+                  {selectedFarmIds.map((farmId) => (
+                    <Pressable
+                      key={farmId}
+                      style={styles.dropdownItem}
+                      onPress={() => {
+                        setPvFarmId(farmId);
+                        setPvFarmDropdownOpen(false);
+                        setArrayTypeDropdownOpen(false);
+                        setModuleTypeDropdownOpen(false);
+                      }}
+                    >
+                      <View style={styles.checkbox}>
+                        {pvFarmId === farmId && <Text style={styles.checkmark}>✓</Text>}
+                      </View>
+                      <Text style={styles.dropdownItemText}>{getFarmLabel(farmId)}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              )}
 
-              {/* Water Source */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Water Source</Text>
-                <TextInput
-                  style={styles.input}
-                  value={irrigationType}
-                  onChangeText={setIrrigationType}
-                  placeholder="e.g., Pond, Well, Stream"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
+              <Text style={styles.subLabel}>kW per acre</Text>
+              <TextInput
+                style={styles.input}
+                value={pvDraftInputs.kwPerAcre}
+                onChangeText={(text) => setPvDraftField('kwPerAcre', text)}
+                placeholder="e.g., 200"
+                placeholderTextColor={COLORS.placeholder}
+                keyboardType="numeric"
+              />
 
-              {/* Additional Notes */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Additional Notes</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={notes}
-                  onChangeText={setNotes}
-                  placeholder="Any additional information about your grazing operation"
-                  placeholderTextColor={COLORS.placeholder}
-                  multiline={true}
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-              </View>
-            </>
+              <Text style={styles.subLabel}>Tilt (degrees)</Text>
+              <TextInput
+                style={styles.input}
+                value={pvDraftInputs.tilt}
+                onChangeText={(text) => setPvDraftField('tilt', text)}
+                placeholder="0 - 90"
+                placeholderTextColor={COLORS.placeholder}
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.subLabel}>Azimuth (degrees)</Text>
+              <TextInput
+                style={styles.input}
+                value={pvDraftInputs.azimuth}
+                onChangeText={(text) => setPvDraftField('azimuth', text)}
+                placeholder="0 - 359"
+                placeholderTextColor={COLORS.placeholder}
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.subLabel}>Array Type</Text>
+              <Pressable
+                style={[styles.dropdownButton, !pvFarmId && styles.dropdownButtonDisabled]}
+                onPress={() => {
+                  if (!pvFarmId) return;
+                  setArrayTypeDropdownOpen(!arrayTypeDropdownOpen);
+                }}
+              >
+                <Text style={styles.dropdownButtonText}>
+                  {pvDraftInputs.arrayType
+                    ? arrayTypeOptions.find((o) => o.value === pvDraftInputs.arrayType)?.label || pvDraftInputs.arrayType
+                    : 'Select array type'}
+                </Text>
+                <Text style={styles.dropdownArrow}>{arrayTypeDropdownOpen ? '▲' : '▼'}</Text>
+              </Pressable>
+              {arrayTypeDropdownOpen && (
+                <View style={styles.dropdownList}>
+                  <ScrollView nestedScrollEnabled={true} style={styles.dropdownInnerScroll}>
+                    {arrayTypeOptions.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setPvDraftField('arrayType', opt.value);
+                          setArrayTypeDropdownOpen(false);
+                        }}
+                      >
+                        <View style={styles.checkbox}>
+                          {pvDraftInputs.arrayType === opt.value && <Text style={styles.checkmark}>✓</Text>}
+                        </View>
+                        <Text style={styles.dropdownItemText}>{opt.label}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              <Text style={styles.subLabel}>Module Type</Text>
+              <Pressable
+                style={[styles.dropdownButton, !pvFarmId && styles.dropdownButtonDisabled]}
+                onPress={() => {
+                  if (!pvFarmId) return;
+                  setModuleTypeDropdownOpen(!moduleTypeDropdownOpen);
+                }}
+              >
+                <Text style={styles.dropdownButtonText}>
+                  {pvDraftInputs.moduleType
+                    ? moduleTypeOptions.find((o) => o.value === pvDraftInputs.moduleType)?.label || pvDraftInputs.moduleType
+                    : 'Select module type'}
+                </Text>
+                <Text style={styles.dropdownArrow}>{moduleTypeDropdownOpen ? '▲' : '▼'}</Text>
+              </Pressable>
+              {moduleTypeDropdownOpen && (
+                <View style={styles.dropdownList}>
+                  <ScrollView nestedScrollEnabled={true} style={styles.dropdownInnerScroll}>
+                    {moduleTypeOptions.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setPvDraftField('moduleType', opt.value);
+                          setModuleTypeDropdownOpen(false);
+                        }}
+                      >
+                        <View style={styles.checkbox}>
+                          {pvDraftInputs.moduleType === opt.value && <Text style={styles.checkmark}>✓</Text>}
+                        </View>
+                        <Text style={styles.dropdownItemText}>{opt.label}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              <Text style={styles.subLabel}>Losses (%)</Text>
+              <TextInput
+                style={styles.input}
+                value={pvDraftInputs.losses}
+                onChangeText={(text) => setPvDraftField('losses', text)}
+                placeholder="e.g., 14"
+                placeholderTextColor={COLORS.placeholder}
+                keyboardType="numeric"
+              />
+
+            </View>
           )}
 
           {(siteIncludes === 'farming' || siteIncludes === 'grazing' || siteIncludes === 'neither') && (
@@ -1439,20 +2096,23 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
 
       {/* Bottom Control Panel */}
       <View style={styles.controlPanel}>
+        {submitError ? (
+          <Text style={styles.errorText}>{submitError}</Text>
+        ) : null}
         <Pressable
           style={({ pressed }) => [
             styles.nextButton,
-            !isFormValid && styles.nextButtonDisabled,
-            pressed && isFormValid && styles.nextButtonPressed,
+            (!isFormValid || submitLoading) && styles.nextButtonDisabled,
+            pressed && isFormValid && !submitLoading && styles.nextButtonPressed,
           ]}
           onPress={handleNext}
-          disabled={!isFormValid}
+          disabled={!isFormValid || submitLoading}
         >
           <Text style={[
             styles.nextButtonText,
-            !isFormValid && styles.nextButtonTextDisabled,
+            (!isFormValid || submitLoading) && styles.nextButtonTextDisabled,
           ]}>
-            Next
+            {submitLoading ? 'Running…' : 'Next'}
           </Text>
         </Pressable>
       </View>
@@ -1953,8 +2613,8 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                       </View>
                     )}
                     
-                    {/* Land Cover Report - Only show for satellite view */}
-                    {expandedViewType.id === 'satellite' && (() => {
+                    {/* Land Cover Report - gated by feature flag */}
+                    {expandedViewType.id === 'satellite' && SHOW_SITE_PREP_REPORT && (() => {
                       const report = currentFarm?.backendAnalysis?.landcoverReport;
                       const clearingCost = currentFarm?.backendAnalysis?.clearingCost;
                       const nlcdClasses = Array.isArray(report?.nlcd?.classes) ? report.nlcd.classes : [];
@@ -2168,6 +2828,294 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           </View>
         </View>
       )}
+
+        <Modal
+          animationType="slide"
+          transparent
+          visible={modelPickerVisible}
+          onRequestClose={() => setModelPickerVisible(false)}
+        >
+          <View style={styles.configModalOverlay}>
+            <View style={styles.configModalCard}>
+              <View style={styles.configModalHeader}>
+                <Text style={styles.configModalTitle}>Choose model</Text>
+                <Pressable style={styles.modalCloseButton} onPress={() => setModelPickerVisible(false)}>
+                  <Text style={styles.modalCloseText}>✕</Text>
+                </Pressable>
+              </View>
+
+              <ScrollView style={styles.configModalBody} contentContainerStyle={styles.configModalBodyContent}>
+                <Pressable style={styles.rotationSaveButton} onPress={fetchModels}>
+                  <Text style={styles.rotationSaveButtonText}>Refresh models</Text>
+                </Pressable>
+                {modelsLoading ? (
+                  <View style={styles.dropdownLoadingRow}>
+                    <ActivityIndicator size="small" color={COLORS.accent} />
+                    <Text style={styles.dropdownEmptyText}>Loading models…</Text>
+                  </View>
+                ) : models.length === 0 ? (
+                  <Text style={styles.dropdownEmptyText}>No models found</Text>
+                ) : (
+                  <View style={styles.configList}>
+                    {models.map((model) => (
+                      <View key={model.id} style={styles.configListItem}>
+                        <View style={styles.configListInfo}>
+                          <Text style={styles.configListName}>{model.name}</Text>
+                          {model.description ? (
+                            <Text style={styles.configListMeta}>{model.description}</Text>
+                          ) : null}
+                          {selectedModelId === model.id ? (
+                            <Text style={styles.selectedModelTag}>Selected</Text>
+                          ) : null}
+                        </View>
+                        <View style={styles.configListActions}>
+                          <Pressable
+                            style={styles.textButton}
+                            onPress={() => {
+                              setSelectedModelId(model.id);
+                              setSelectedModel(model);
+                              setModelPickerVisible(false);
+                            }}
+                          >
+                            <Text style={styles.textButtonText}>Use</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={configModalVisible}
+        onRequestClose={() => setConfigModalVisible(false)}
+      >
+        <View style={styles.configModalOverlay}>
+          <View style={styles.configModalCard}>
+            <View style={styles.configModalHeader}>
+              <Text style={styles.configModalTitle}>Save / Load configuration</Text>
+              <Pressable style={styles.modalCloseButton} onPress={() => setConfigModalVisible(false)}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.configModalBody} contentContainerStyle={styles.configModalBodyContent}>
+              <Text style={styles.label}>Save current configuration</Text>
+              <TextInput
+                style={styles.input}
+                value={configName}
+                onChangeText={setConfigName}
+                placeholder="Enter a name (required)"
+                placeholderTextColor={COLORS.placeholder}
+              />
+              {configError ? <Text style={styles.cropEditorError}>{configError}</Text> : null}
+              <Pressable
+                style={styles.rotationSaveButton}
+                onPress={saveCurrentConfig}
+              >
+                <Text style={styles.rotationSaveButtonText}>Save configuration</Text>
+              </Pressable>
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Saved configurations</Text>
+              {configLoading ? (
+                <View style={styles.dropdownLoadingRow}>
+                  <ActivityIndicator size="small" color={COLORS.accent} />
+                  <Text style={styles.dropdownEmptyText}>Loading configurations…</Text>
+                </View>
+              ) : savedConfigs.length === 0 ? (
+                <Text style={styles.dropdownEmptyText}>No saved configurations yet</Text>
+              ) : (
+                <View style={styles.configList}>
+                  {savedConfigs.map((config) => (
+                    <View key={config.id} style={styles.configListItem}>
+                      <View style={styles.configListInfo}>
+                        <Text style={styles.configListName}>{config.name}</Text>
+                        <Text style={styles.configListMeta}>{config.savedAt ? new Date(config.savedAt).toLocaleString() : ''}</Text>
+                      </View>
+                      <View style={styles.configListActions}>
+                        <Pressable style={styles.textButton} onPress={() => loadConfig(config)}>
+                          <Text style={styles.textButtonText}>Load</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.textButton, styles.dangerTextButton]}
+                          onPress={() => confirmDeleteConfig(config)}
+                        >
+                          <Text style={[styles.textButtonText, styles.dangerText]}>Delete</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={cropEditorVisible}
+        onRequestClose={closeCropEditor}
+      >
+        <View style={styles.cropModalOverlay}>
+          <View style={styles.cropModalCard}>
+            <View style={styles.cropModalHeader}>
+              <Text style={styles.cropModalTitle}>Crop table</Text>
+              <Pressable style={styles.modalCloseButton} onPress={closeCropEditor}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.cropModalBody} contentContainerStyle={styles.cropModalBodyContent}>
+              <Text style={styles.label}>{cropEditorMode === 'edit' ? 'Edit crop' : 'Add a new crop'}</Text>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Name *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.name}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, name: text }))}
+                  placeholder="e.g., Corn"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Category</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.category}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, category: text }))}
+                  placeholder="e.g., Row crop"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Unit *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.unit}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, unit: text }))}
+                  placeholder="e.g., bushel"
+                  placeholderTextColor={COLORS.placeholder}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Yield per acre *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.yield_per_acre}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, yield_per_acre: text }))}
+                  placeholder="e.g., 180"
+                  placeholderTextColor={COLORS.placeholder}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Price per unit (year 0) *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.price_per_unit_0}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, price_per_unit_0: text }))}
+                  placeholder="e.g., 4.2"
+                  placeholderTextColor={COLORS.placeholder}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Cost per acre *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.cost_per_acre}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, cost_per_acre: text }))}
+                  placeholder="e.g., 650"
+                  placeholderTextColor={COLORS.placeholder}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.subLabel}>Escalation rate</Text>
+                <TextInput
+                  style={styles.input}
+                  value={cropForm.escalation_rate}
+                  onChangeText={(text) => setCropForm((prev) => ({ ...prev, escalation_rate: text }))}
+                  placeholder="e.g., 0.02"
+                  placeholderTextColor={COLORS.placeholder}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              {cropEditorError ? (
+                <Text style={styles.cropEditorError}>{cropEditorError}</Text>
+              ) : null}
+
+              <View style={styles.cropModalActions}>
+                <Pressable
+                  style={[styles.rotationSaveButton, cropEditorSaving && styles.nextButtonDisabled]}
+                  onPress={saveCropFromForm}
+                  disabled={cropEditorSaving}
+                >
+                  <Text style={styles.rotationSaveButtonText}>{cropEditorMode === 'edit' ? 'Update crop' : 'Add crop'}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.secondaryButton, cropEditorSaving && styles.nextButtonDisabled]}
+                  onPress={startNewCrop}
+                  disabled={cropEditorSaving}
+                >
+                  <Text style={styles.secondaryButtonText}>Start new</Text>
+                </Pressable>
+              </View>
+
+              <Text style={[styles.label, { marginTop: 12 }]}>Existing crops</Text>
+              {cropOptions.length === 0 ? (
+                <Text style={styles.dropdownEmptyText}>No crops available yet</Text>
+              ) : (
+                <View style={styles.cropList}>
+                  {cropOptions.map((crop) => (
+                    <View key={crop.id || crop.name} style={styles.cropListItem}>
+                      <View style={styles.cropListInfo}>
+                        <Text style={styles.cropListName}>{crop.name || crop.crop}</Text>
+                        <Text style={styles.cropListMeta}>
+                          {[crop.category, crop.unit].filter(Boolean).join(' • ') || 'No category'}
+                        </Text>
+                        <View style={styles.cropListStats}>
+                          <Text style={styles.cropStatText}>Yield/acre: {formatNumber(crop.yield_per_acre)}</Text>
+                          <Text style={styles.cropStatText}>Price/unit: {formatNumber(crop.price_per_unit_0)}</Text>
+                          <Text style={styles.cropStatText}>Cost/acre: {formatNumber(crop.cost_per_acre)}</Text>
+                          <Text style={styles.cropStatText}>Escalation: {formatNumber(crop.escalation_rate)}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.cropListActions}>
+                        <Pressable style={styles.textButton} onPress={() => startEditCrop(crop)}>
+                          <Text style={styles.textButtonText}>Edit</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.textButton, styles.dangerTextButton]}
+                          onPress={() => confirmDeleteCrop(crop)}
+                          disabled={cropEditorSaving}
+                        >
+                          <Text style={[styles.textButtonText, styles.dangerText]}>Delete</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -2321,6 +3269,13 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderWidth: 2,
+    borderColor: COLORS.borderLight,
+    borderRadius: 3,
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.inputBg,
+  },
   subLabel: {
     fontSize: 14,
     color: COLORS.textLight,
@@ -2341,12 +3296,200 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-    borderColor: COLORS.borderLight,
-    borderRadius: 3,
-    marginRight: 10,
+  secondaryButton: {
+    marginTop: 12,
+    backgroundColor: COLORS.inputBg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  cropEditorError: {
+    color: '#C54B4B',
+    fontSize: 14,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  cropModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 16,
+  },
+  cropModalCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    width: '100%',
+    maxHeight: '90%',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  cropModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  cropModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  cropModalBody: {
+    flexGrow: 0,
+  },
+  cropModalBodyContent: {
+    paddingBottom: 16,
+  },
+  cropModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  cropList: {
+    marginTop: 8,
+    gap: 8,
+  },
+  cropListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     backgroundColor: COLORS.inputBg,
+  },
+  cropListInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  cropListName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  cropListMeta: {
+    fontSize: 13,
+    color: COLORS.textLight,
+    marginTop: 2,
+  },
+  cropListActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  cropListStats: {
+    marginTop: 6,
+    gap: 2,
+  },
+  cropStatText: {
+    fontSize: 13,
+    color: COLORS.text,
+  },
+  textButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  textButtonText: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dangerText: {
+    color: '#C54B4B',
+  },
+  dangerTextButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  configModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  configModalCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    width: '100%',
+    maxHeight: '90%',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  configModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  configModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  configModalBody: {
+    flexGrow: 0,
+  },
+  configModalBodyContent: {
+    paddingBottom: 16,
+  },
+  configList: {
+    marginTop: 8,
+    gap: 8,
+  },
+  configListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: COLORS.inputBg,
+  },
+  configListInfo: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  configListName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  configListMeta: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    marginTop: 2,
+  },
+  selectedModelTag: {
+    marginTop: 2,
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  configListActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
   checkmark: {
     fontSize: 14,
@@ -2387,6 +3530,12 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     fontStyle: 'italic',
     marginTop: 10,
+  },
+  errorText: {
+    color: '#C54B4B',
+    fontSize: 14,
+    marginBottom: 8,
+    textAlign: 'center',
   },
   controlPanel: {
     backgroundColor: COLORS.headerBg,

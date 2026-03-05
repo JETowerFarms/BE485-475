@@ -15,6 +15,9 @@ const farmRoutes = require('./routes/farmHandler');
 const geoRoutes = require('./routes/geo');
 const cropRoutes = require('./routes/crops');
 const { router: reportRoutes } = require('./routes/reportsHandler');
+const linearOptimizationRoutes = require('./routes/linearOptimization');
+const modelRoutes = require('./routes/models');
+const authRoutes = require('./routes/auth');
 
 // Create Express app
 const app = express();
@@ -72,6 +75,9 @@ app.use('/api/farms', farmRoutes);
 app.use('/api/geo', geoRoutes);
 app.use('/api/crops', cropRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/linear-optimization', linearOptimizationRoutes);
+app.use('/api/models', modelRoutes);
+app.use('/api/auth', authRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -83,6 +89,9 @@ app.get('/', (req, res) => {
       geo: '/api/geo',
       crops: '/api/crops',
       reports: '/api/reports',
+      linearOptimization: '/api/linear-optimization',
+      models: '/api/models',
+      auth: '/api/auth',
       health: '/health',
     },
   });

@@ -110,6 +110,11 @@ backend/logs/
 postgres_data/
 pgadmin_data/
 
+# Local environment secrets
+.env
+.env.local
+.env.*.local
+
 # Expo (legacy)
 .expo/
 dist/
