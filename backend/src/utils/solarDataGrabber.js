@@ -13,11 +13,31 @@ const { addBatchData } = require('../../build/Release/solarSuitabilityParser.nod
  * @param {Array<Array<number>>} points - Array of [lng, lat] coordinate pairs
  * @returns {Promise<Array<Object>>} Array of raw data objects for each point
  */
+// Max points processed in parallel — each fires 7 DB queries, so
+// CONCURRENCY_LIMIT * 7 must stay well under DB_MAX_CONNECTIONS.
+const CONCURRENCY_LIMIT = 5;
+
+/**
+ * Run an async function over an array with bounded concurrency.
+ */
+async function mapConcurrent(arr, concurrency, fn) {
+  const results = new Array(arr.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < arr.length) {
+      const i = idx++;
+      results[i] = await fn(arr[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, arr.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
 async function querySolarDataForPoints(points, options = {}) {
   const skipNulls = Boolean(options.skipNulls);
-  // Process all points in parallel
-  const results = await Promise.all(
-    points.map(async ([lng, lat]) => {
+  // Process points with bounded concurrency — avoids exhausting the DB connection pool
+  const results = await mapConcurrent(points, CONCURRENCY_LIMIT, async ([lng, lat]) => {
       // Params table - prepare calculations outside queries
       const params = {
         pointGeom: `ST_SetSRID(ST_Point(${lng}, ${lat}), 4326)`,
@@ -92,6 +112,8 @@ async function querySolarDataForPoints(points, options = {}) {
         bufferGeom: `ST_Buffer(ST_SetSRID(ST_Point(${lng}, ${lat}), 4326), ${infraSearchRadius})`
       };
 
+      // TODO: wrong table names — real tables are landcover_building_locations_usace_ienc
+      // Fix: replace buildings/building_locations/structures with landcover_building_locations_usace_ienc
       const buildingQuery = `
         SELECT
           COUNT(*) as total_building_count,
@@ -106,6 +128,8 @@ async function querySolarDataForPoints(points, options = {}) {
         WHERE ST_DWithin(b.geom, ${params.pointGeom}, ${infraParams.searchRadius});
       `;
 
+      // TODO: wrong table names — real tables are landcover_local_roads, landcover_primary_roads, landcover_roads_usace_ienc
+      // Fix: replace roads/local_roads/primary_roads/road_lines with the landcover_ prefixed versions
       const roadQuery = `
         SELECT
           COUNT(*) as total_road_count,
@@ -122,6 +146,8 @@ async function querySolarDataForPoints(points, options = {}) {
         WHERE ST_DWithin(r.geom, ${params.pointGeom}, ${infraParams.searchRadius});
       `;
 
+      // TODO: wrong table names — real tables are landcover_waterbody, landcover_lakes, landcover_river_areas, landcover_river_lines, landcover_streams_mouth
+      // Fix: replace waterbodies/lakes/rivers/river_areas/streams with the landcover_ prefixed versions
       const waterQuery = `
         SELECT
           COUNT(*) as total_water_count,
@@ -211,8 +237,7 @@ async function querySolarDataForPoints(points, options = {}) {
         road_present: roadPresent ? 1 : 0,
         water_present: waterPresent ? 1 : 0
       };
-    })
-  );
+  });
 
   const filtered = results.filter(Boolean);
 

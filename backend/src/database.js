@@ -25,6 +25,9 @@ const dbConfig = {
     }
     return max;
   })(),
+  ssl: process.env.PGSSLMODE && process.env.PGSSLMODE !== 'disable'
+    ? { rejectUnauthorized: false }
+    : false,
   idleTimeoutMillis: (() => {
     const timeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 30000;
     if (process.env.DB_IDLE_TIMEOUT && isNaN(timeout)) {
@@ -32,7 +35,13 @@ const dbConfig = {
     }
     return timeout;
   })(),
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: (() => {
+    const timeout = process.env.DB_CONNECTION_TIMEOUT ? parseInt(process.env.DB_CONNECTION_TIMEOUT, 10) : 60000;
+    if (process.env.DB_CONNECTION_TIMEOUT && isNaN(timeout)) {
+      throw new Error('Invalid DB_CONNECTION_TIMEOUT: must be a valid integer');
+    }
+    return timeout;
+  })(),
 };
 
 // Create database instance
@@ -151,6 +160,17 @@ const queries = {
        WHERE id = $1
        RETURNING id`,
       [farmId, avgSuitability]
+    );
+  },
+
+  updateFarmName: async (farmId, userId, name) => {
+    return db.oneOrNone(
+      `UPDATE farms
+       SET name = $3, updated_at = NOW()
+       WHERE id = $1 AND user_id = $2
+       RETURNING id, name, area_acres, avg_suitability, created_at, updated_at,
+                 ST_AsGeoJSON(boundary)::json as boundary`,
+      [farmId, userId, name]
     );
   },
 

@@ -59,6 +59,8 @@ async function queryClearingCostDataForPoints(points, options = {}) {
       `;
 
       // Query building coverage from all building-related tables
+      // TODO: wrong table names — real table is landcover_building_locations_usace_ienc
+      // Fix: replace buildings/building_locations/structures with landcover_building_locations_usace_ienc
       const buildingQuery = `
         SELECT
           COUNT(*) as total_building_count,
@@ -75,6 +77,8 @@ async function queryClearingCostDataForPoints(points, options = {}) {
       `;
 
       // Query road coverage from all road-related tables
+      // TODO: wrong table names — real tables are landcover_local_roads, landcover_primary_roads, landcover_roads_usace_ienc
+      // Fix: replace roads/local_roads/primary_roads/road_lines with the landcover_ prefixed versions
       const roadQuery = `
         SELECT
           COUNT(*) as total_road_count,
@@ -93,6 +97,8 @@ async function queryClearingCostDataForPoints(points, options = {}) {
       `;
 
       // Query water coverage from all water-related tables
+      // TODO: wrong table names — real tables are landcover_waterbody, landcover_lakes, landcover_river_areas, landcover_river_lines, landcover_streams_mouth
+      // Fix: replace waterbodies/lakes/rivers/river_areas/streams with the landcover_ prefixed versions
       const waterQuery = `
         SELECT
           COUNT(*) as total_water_count,

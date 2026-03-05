@@ -662,7 +662,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [submitError, setSubmitError] = useState('');
   const [submitLoading, setSubmitLoading] = useState(false);
 
-  const isFormValid = selectedFarmIds.length > 0 && siteIncludes === 'farming';
+  const isFormValid = selectedFarmIds.length > 0 && (siteIncludes === 'farming' || siteIncludes === 'neither');
 
   const toggleFarmSelection = (farmId) => {
     setSelectedFarmIds(prev => 
@@ -1032,19 +1032,32 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     fetchModels();
   }, [fetchModels]);
 
-  // Keep selected model aligned with fetched list
+  // Keep selected model aligned with fetched list without overwriting user choice.
   useEffect(() => {
     if (!models || models.length === 0) {
       setSelectedModel(null);
       setSelectedModelId(null);
       return;
     }
-    const preferred = selectedModelId ? models.find((m) => m.id === selectedModelId) : null;
-    const fallback = models.find((m) => m.name === 'Default') || models[0];
-    const nextModel = preferred || fallback;
-    setSelectedModel(nextModel || null);
-    setSelectedModelId(nextModel ? nextModel.id : null);
-  }, [models, selectedModelId]);
+
+    // If user already picked a model and it still exists, keep it.
+    if (selectedModelId) {
+      const preferred = models.find((m) => m.id === selectedModelId);
+      if (preferred) {
+        if (selectedModel?.id !== preferred.id) {
+          setSelectedModel(preferred);
+        }
+        return;
+      }
+      // If the chosen model disappeared from the list, leave the current selection untouched.
+      return;
+    }
+
+    // No prior selection: pick Default if present, else first model.
+    const fallback = models.find((m) => m.name === 'Default') || models[0] || null;
+    setSelectedModel(fallback);
+    setSelectedModelId(fallback ? fallback.id : null);
+  }, [models, selectedModelId, selectedModel]);
 
   const buildConfigSnapshot = () => ({
     selectedFarmIds,
@@ -1468,7 +1481,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       const response = await fetch(buildApiUrl('/reports/analyze'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ coordinates }),
+        body: JSON.stringify({ coordinates, userId: 'default-user' }),
       });
 
       if (!response.ok) {
@@ -1526,8 +1539,8 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       return;
     }
 
-    if (siteIncludes !== 'farming') {
-      setSubmitError('Select "Farming" to provide PV system inputs.');
+    if (siteIncludes !== 'farming' && siteIncludes !== 'neither') {
+      setSubmitError('Select "Farming" or "Neither" to provide PV system inputs.');
       return;
     }
 
@@ -1913,86 +1926,12 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           )}
 
           {siteIncludes === 'grazing' && (
-            <>
-              {/* Grazing Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Grazing Type *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={farmType}
-                  onChangeText={setFarmType}
-                  placeholder="e.g., Rotational, Continuous, Intensive"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
-
-              {/* Acreage */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Total Acreage</Text>
-                <TextInput
-                  style={styles.input}
-                  value={acreage}
-                  onChangeText={setAcreage}
-                  placeholder="Enter total acres"
-                  placeholderTextColor={COLORS.placeholder}
-                  keyboardType="numeric"
-                />
-              </View>
-
-              {/* Livestock Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Livestock Type</Text>
-                <TextInput
-                  style={styles.input}
-                  value={primaryCrops}
-                  onChangeText={setPrimaryCrops}
-                  placeholder="e.g., Cattle, Sheep, Goats"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
-
-              {/* Pasture Type */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Pasture Type</Text>
-                <TextInput
-                  style={styles.input}
-                  value={soilType}
-                  onChangeText={setSoilType}
-                  placeholder="e.g., Native, Improved, Mixed"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
-
-              {/* Water Source */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Water Source</Text>
-                <TextInput
-                  style={styles.input}
-                  value={irrigationType}
-                  onChangeText={setIrrigationType}
-                  placeholder="e.g., Pond, Well, Stream"
-                  placeholderTextColor={COLORS.placeholder}
-                />
-              </View>
-
-              {/* Additional Notes */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Additional Notes</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={notes}
-                  onChangeText={setNotes}
-                  placeholder="Any additional information about your grazing operation"
-                  placeholderTextColor={COLORS.placeholder}
-                  multiline={true}
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-              </View>
-            </>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>future direction</Text>
+            </View>
           )}
 
-          {siteIncludes === 'farming' && (
+          {(siteIncludes === 'farming' || siteIncludes === 'neither') && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>PV System Inputs (per farm)</Text>
 

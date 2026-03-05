@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <unordered_set>
+#include <stdexcept>
 
 // Global resolution variable
 static double FARM_RESOLUTION = 0.001;

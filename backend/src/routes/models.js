@@ -24,9 +24,9 @@ const FIELD_DEFS = [
   { camel: 'electricityEscalation', column: 'electricity_escalation' },
   { camel: 'cropEscalation', column: 'crop_escalation' },
   { camel: 'projectLife', column: 'project_life' },
-  { camel: 'landIntensityAcresPerMW', column: 'land_intensity_acres_per_MW' },
+  { camel: 'landIntensityAcresPerMW', column: 'land_intensity_acres_per_mw' },
   { camel: 'degradationRate', column: 'degradation_rate' },
-  { camel: 'installedCostPerMW', column: 'installed_cost_per_MW' },
+  { camel: 'installedCostPerMW', column: 'installed_cost_per_mw' },
   { camel: 'sitePrepCostPerAcre', column: 'site_prep_cost_per_acre' },
   { camel: 'gradingCostPerAcre', column: 'grading_cost_per_acre' },
   { camel: 'retillingCostPerAcre', column: 'retilling_cost_per_acre' },
@@ -35,7 +35,7 @@ const FIELD_DEFS = [
   { camel: 'vegetationCostPerAcre', column: 'vegetation_cost_per_acre' },
   { camel: 'insuranceCostPerAcre', column: 'insurance_cost_per_acre' },
   { camel: 'oandmCostPerKw', column: 'oandm_cost_per_kw' },
-  { camel: 'replacementCostPerMW', column: 'replacement_cost_per_MW' },
+  { camel: 'replacementCostPerMW', column: 'replacement_cost_per_mw' },
   { camel: 'replacementYear', column: 'replacement_year' },
   { camel: 'decommissionCostPerKw', column: 'decommission_cost_per_kw' },
   { camel: 'remediationCostPerAcre', column: 'remediation_cost_per_acre' },
@@ -196,6 +196,29 @@ router.get('/template', async (req, res) => {
     return res.json({ template: fallback });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load model template', details: err.message });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'Invalid model id' });
+    }
+
+    // Prevent deletion of the Default model
+    const row = await db.oneOrNone('SELECT id, name FROM models WHERE id = $1', [id]);
+    if (!row) {
+      return res.status(404).json({ error: 'Model not found' });
+    }
+    if (row.name === 'Default') {
+      return res.status(403).json({ error: 'The Default model cannot be deleted' });
+    }
+
+    await db.none('DELETE FROM models WHERE id = $1', [id]);
+    res.json({ deleted: true, id });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete model', details: err.message });
   }
 });
 

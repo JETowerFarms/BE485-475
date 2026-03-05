@@ -4,7 +4,6 @@ import {
   Text,
   StatusBar,
   Pressable,
-  Modal,
   TextInput,
   ScrollView,
   StyleSheet,
@@ -69,29 +68,6 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
 
   const [showMethodology, setShowMethodology] = useState(false);
   const [graphIndex, setGraphIndex] = useState(0);
-  const emptyModelForm = {
-    name: '',
-    description: '',
-    discountRate: '',
-    projectLife: '',
-    landIntensityAcresPerMW: '',
-    installedCostPerMW: '',
-    degradationRate: '',
-    interconnectionFraction: '',
-    constraintsMinAgFraction: '',
-    constraintsMaxPrimeSolar: '',
-    constraintsSetbackFraction: '',
-    developerRetentionFraction: '',
-    leaseMinRate: '',
-    leaseMaxRate: '',
-    leaseEscalationRate: '',
-  };
-  const [modelModalVisible, setModelModalVisible] = useState(false);
-  const [newModelForm, setNewModelForm] = useState(emptyModelForm);
-  const [newModelError, setNewModelError] = useState('');
-  const [newModelSaving, setNewModelSaving] = useState(false);
-  const [newModelSuccess, setNewModelSuccess] = useState('');
-
   // Build a deck of graphs: one per farm/crop combination
   const graphDeck = useMemo(() => {
     if (analysisResults.length === 0) return [];
@@ -134,75 +110,7 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
     });
   }, [graphDeck.length]);
 
-  const currentGraph = graphDeck[graphIndex];
-
-  const resetModelForm = () => {
-    setNewModelForm(emptyModelForm);
-    setNewModelError('');
-    setNewModelSuccess('');
-  };
-
-  const setNewModelField = (field, value) => {
-    setNewModelForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const saveNewModel = async () => {
-    setNewModelError('');
-    setNewModelSuccess('');
-    const name = newModelForm.name.trim();
-    if (!name) {
-      setNewModelError('Name is required');
-      return;
-    }
-
-    const payload = { name, description: newModelForm.description.trim() || null };
-    const numericFields = [
-      'discountRate',
-      'projectLife',
-      'landIntensityAcresPerMW',
-      'installedCostPerMW',
-      'degradationRate',
-      'interconnectionFraction',
-      'constraintsMinAgFraction',
-      'constraintsMaxPrimeSolar',
-      'constraintsSetbackFraction',
-      'developerRetentionFraction',
-      'leaseMinRate',
-      'leaseMaxRate',
-      'leaseEscalationRate',
-    ];
-
-    for (const field of numericFields) {
-      const raw = newModelForm[field];
-      if (raw === '' || raw === null || raw === undefined) continue;
-      const num = Number(raw);
-      if (!Number.isFinite(num)) {
-        setNewModelError(`${field} must be a number`);
-        return;
-      }
-      payload[field] = num;
-    }
-
-    setNewModelSaving(true);
-    try {
-      const resp = await fetch(buildApiUrl('/models'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        const detail = data?.details?.join('; ') || data?.error || resp.statusText;
-        throw new Error(detail || 'Failed to save model');
-      }
-      setNewModelSuccess(`Saved model "${data.name}". Choose it on the previous screen.`);
-      setNewModelForm(emptyModelForm);
-    } catch (err) {
-      setNewModelError(err?.message || 'Failed to save model');
-    } finally {
-      setNewModelSaving(false);
-    }
-  };
+  const currentGraph = graphDeck[graphIndex] || null;
 
   const renderGraph = () => {
     if (!currentGraph) {
@@ -222,24 +130,8 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
     const sy = (v) => pad.top + gH - (v / maxY) * gH;
 
     // Constraint lines
-    const minAg = cropLand * 0.51 / (cropLand || 1) * cropLand; // min_ag_fraction * total
-
-    // Feasible region vertices (simplified): corners of the polytope
-    // A_s + A_c = cropLand, A_c >= minAg, A_s <= maxSolar, A_s >= 0
+    const minAg = cropLand * 0.51 / (cropLand || 1) * cropLand;
     const solarCap = Math.min(maxSolar, usableLand);
-    const feasible = [];
-    // Point 1: all crop (A_s=0, A_c=cropLand)
-    feasible.push([0, cropLand]);
-    // Point 2: A_s=0, A_c=minAg (if we want to show min ag line)
-    // Point 3: A_s = cropLand - minAg (capped at solarCap), A_c = minAg
-    const s3x = Math.min(cropLand - minAg, solarCap);
-    feasible.push([s3x, minAg]);
-    // Point 4: A_s = solarCap, A_c = cropLand - solarCap
-    if (solarCap < cropLand - minAg) {
-      feasible.push([solarCap, cropLand - solarCap]);
-    }
-
-    const feasiblePoints = feasible.map(([x, y]) => `${sx(x)},${sy(y)}`).join(' ');
 
     const GRAPH_COLORS = {
       axis: '#5A554E',
@@ -253,10 +145,18 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
       dot50: '#5A554E',
     };
     const dotColors = [GRAPH_COLORS.dot30, GRAPH_COLORS.dot40, GRAPH_COLORS.dot50];
-
-    // Tick helpers
     const xTicks = 5;
     const yTicks = 5;
+
+    // Feasible region polygon
+    const feasible = [];
+    feasible.push([0, cropLand]);
+    const s3x = Math.min(cropLand - minAg, solarCap);
+    feasible.push([s3x, minAg]);
+    if (solarCap < cropLand - minAg) {
+      feasible.push([solarCap, cropLand - solarCap]);
+    }
+    const feasiblePoints = feasible.map(([x, y]) => `${sx(x)},${sy(y)}`).join(' ');
 
     return (
       <View style={styles.graphInner}>
@@ -429,15 +329,6 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
           <Pressable onPress={() => setShowMethodology(!showMethodology)} style={styles.methodToggle}>
             <Text style={styles.methodToggleText}>{showMethodology ? 'Hide Methodology' : 'Show Methodology'}</Text>
           </Pressable>
-          <Pressable
-            onPress={() => {
-              resetModelForm();
-              setModelModalVisible(true);
-            }}
-            style={styles.modelButton}
-          >
-            <Text style={styles.methodToggleText}>Define new model</Text>
-          </Pressable>
         </View>
         {showMethodology && (
           <ScrollView style={styles.methodPanel} nestedScrollEnabled>
@@ -476,79 +367,6 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         )}
       </ScrollView>
 
-      <Modal
-        transparent
-        animationType="slide"
-        visible={modelModalVisible}
-        onRequestClose={() => setModelModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Define new model</Text>
-              <Pressable onPress={() => setModelModalVisible(false)} style={styles.modalCloseButton}>
-                <Text style={styles.modalCloseText}>✕</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-              <Text style={styles.modalHint}>Optional fields fall back to the Default model values.</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="Model name (required)"
-                placeholderTextColor={COLORS.textLight}
-                value={newModelForm.name}
-                onChangeText={(v) => setNewModelField('name', v)}
-              />
-              <TextInput
-                style={[styles.modalInput, styles.modalTextArea]}
-                placeholder="Description (optional)"
-                placeholderTextColor={COLORS.textLight}
-                value={newModelForm.description}
-                onChangeText={(v) => setNewModelField('description', v)}
-                multiline
-              />
-
-              <Text style={styles.modalSectionLabel}>Economics</Text>
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Discount rate (e.g., 0.07)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.discountRate)} onChangeText={(v) => setNewModelField('discountRate', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Project life (years)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.projectLife)} onChangeText={(v) => setNewModelField('projectLife', v)} />
-
-              <Text style={styles.modalSectionLabel}>Solar build</Text>
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Land intensity (acres/MW)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.landIntensityAcresPerMW)} onChangeText={(v) => setNewModelField('landIntensityAcresPerMW', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Installed cost ($/MW)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.installedCostPerMW)} onChangeText={(v) => setNewModelField('installedCostPerMW', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Degradation rate (e.g., 0.005)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.degradationRate)} onChangeText={(v) => setNewModelField('degradationRate', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Interconnection fraction (0-1)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.interconnectionFraction)} onChangeText={(v) => setNewModelField('interconnectionFraction', v)} />
-
-              <Text style={styles.modalSectionLabel}>Constraints</Text>
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Min agriculture fraction (0-1)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.constraintsMinAgFraction)} onChangeText={(v) => setNewModelField('constraintsMinAgFraction', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Max prime solar fraction (0-1)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.constraintsMaxPrimeSolar)} onChangeText={(v) => setNewModelField('constraintsMaxPrimeSolar', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Setback fraction (0-1)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.constraintsSetbackFraction)} onChangeText={(v) => setNewModelField('constraintsSetbackFraction', v)} />
-
-              <Text style={styles.modalSectionLabel}>Developer / lease</Text>
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Developer retention fraction (0-1)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.developerRetentionFraction)} onChangeText={(v) => setNewModelField('developerRetentionFraction', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Lease min rate ($/acre/mo)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.leaseMinRate)} onChangeText={(v) => setNewModelField('leaseMinRate', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Lease max rate ($/acre/mo)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.leaseMaxRate)} onChangeText={(v) => setNewModelField('leaseMaxRate', v)} />
-              <TextInput style={styles.modalInput} keyboardType="numeric" placeholder="Lease escalation rate (0-1)" placeholderTextColor={COLORS.textLight} value={String(newModelForm.leaseEscalationRate)} onChangeText={(v) => setNewModelField('leaseEscalationRate', v)} />
-
-              {newModelError ? <Text style={styles.modalError}>{newModelError}</Text> : null}
-              {newModelSuccess ? <Text style={styles.modalSuccess}>{newModelSuccess}</Text> : null}
-
-              <View style={styles.modalActions}>
-                <Pressable style={[styles.modalButton, styles.modalCancel]} onPress={() => setModelModalVisible(false)}>
-                  <Text style={styles.modalButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.modalButton, styles.modalPrimary, newModelSaving && styles.modalDisabled]}
-                  onPress={saveNewModel}
-                  disabled={newModelSaving}
-                >
-                  <Text style={styles.modalButtonText}>{newModelSaving ? 'Saving…' : 'Save model'}</Text>
-                </Pressable>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 };

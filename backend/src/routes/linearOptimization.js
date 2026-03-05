@@ -14,7 +14,7 @@ const schema = Joi.object({
   }).required(),
   acres: Joi.number().positive().required(),
   crops: Joi.array().items(Joi.string().trim()).min(1).required(),
-  modelId: Joi.number().integer().optional().allow(null),
+  modelId: Joi.number().integer().required(),
   pvwatts: Joi.object({
     lat: Joi.number().required(),
     lon: Joi.number().required(),
@@ -114,10 +114,6 @@ async function fetchModel(modelId) {
   return db.oneOrNone('SELECT * FROM models WHERE id = $1', [modelId]);
 }
 
-async function fetchDefaultModel() {
-  return db.oneOrNone('SELECT * FROM models ORDER BY id ASC LIMIT 1');
-}
-
 function buildModelConfig(row) {
   if (!row) return null;
   const cfg = { name: row.name };
@@ -147,7 +143,8 @@ async function runPython({ acres, crops, cropData, pvwattsData, modelConfig }) {
     if (modelConfig) {
       args.push('--model-config', JSON.stringify(modelConfig));
     }
-    const proc = spawn('python', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const pythonBin = process.env.PYTHON_BIN || 'python3';
+    const proc = spawn(pythonBin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     let stdout = '';
     let stderr = '';
@@ -187,7 +184,7 @@ router.post('/', async (req, res) => {
   try {
     const payload = validate(req.body);
 
-    const nrelKey = 'SP99xSHv1O1gGQjQFtXfJ2QuUzRILBOnPDo2HZTe';
+    const nrelKey = process.env.NREL_API_KEY;
     if (!nrelKey) {
       return res.status(500).json({ error: 'Missing NREL API key' });
     }
@@ -197,13 +194,9 @@ router.post('/', async (req, res) => {
     const cropData = await fetchCropData(payload.crops);
 
     let modelRow = null;
-    if (payload.modelId) {
-      modelRow = await fetchModel(payload.modelId);
-      if (!modelRow) {
-        return res.status(404).json({ error: `Model ${payload.modelId} not found` });
-      }
-    } else {
-      modelRow = await fetchDefaultModel();
+    modelRow = await fetchModel(payload.modelId);
+    if (!modelRow) {
+      return res.status(404).json({ error: `Model ${payload.modelId} not found` });
     }
 
     const modelConfig = modelRow

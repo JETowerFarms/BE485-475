@@ -18,6 +18,11 @@ const farmIdSchema = Joi.object({
   farmId: Joi.number().integer().positive().required(),
 });
 
+const updateFarmSchema = Joi.object({
+  userId: Joi.string().required(),
+  name: Joi.string().min(1).max(200).required(),
+});
+
 // Calculate area in acres from coordinates (array of [lng, lat])
 const calculateAreaAcres = (coordinates) => {
   if (!coordinates || coordinates.length < 3) return 0;
@@ -249,6 +254,71 @@ router.post('/', async (req, res, next) => {
     return res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to create farm'
+    });
+  }
+});
+
+// PUT /api/farms/:id
+// Update farm name for a specific farm
+router.put('/:id', async (req, res, next) => {
+  try {
+    const farmId = parseInt(req.params.id);
+
+    const { error: idError } = farmIdSchema.validate({ farmId });
+    if (idError) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: idError.details[0].message,
+      });
+    }
+
+    const { error: bodyError, value } = updateFarmSchema.validate(req.body);
+    if (bodyError) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: bodyError.details[0].message,
+      });
+    }
+
+    const { userId, name } = value;
+
+    let updatedFarm;
+    try {
+      updatedFarm = await queries.updateFarmName(farmId, userId, name);
+    } catch (dbError) {
+      console.error('Error updating farm name in database:', dbError);
+      const hint = getDbConnectionHint(dbError);
+      return res.status(500).json({
+        error: 'Database Error',
+        message: 'Failed to update farm name',
+        hint,
+      });
+    }
+
+    if (!updatedFarm) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Farm not found or you do not have permission to update it',
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        id: updatedFarm.id,
+        name: updatedFarm.name,
+        areaAcres: parseFloat(updatedFarm.area_acres),
+        avgSuitability: updatedFarm.avg_suitability == null ? null : parseFloat(updatedFarm.avg_suitability),
+        boundary: updatedFarm.boundary,
+        createdAt: updatedFarm.created_at,
+        updatedAt: updatedFarm.updated_at,
+      },
+    });
+  } catch (error) {
+    console.error('Error updating farm:', error);
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Failed to update farm',
     });
   }
 });

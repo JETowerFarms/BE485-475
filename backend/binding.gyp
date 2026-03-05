@@ -18,7 +18,11 @@
         "-std=c++17"
       ],
       "cflags_cc": [
-        "-std=c++17"
+        "-std=c++17",
+        "-fexceptions"
+      ],
+      "cflags_cc!": [
+        "-fno-exceptions"
       ],
       "xcode_settings": {
         "OTHER_CFLAGS": [
@@ -117,7 +121,11 @@
         "-std=c++17"
       ],
       "cflags_cc": [
-        "-std=c++17"
+        "-std=c++17",
+        "-fexceptions"
+      ],
+      "cflags_cc!": [
+        "-fno-exceptions"
       ],
       "xcode_settings": {
         "OTHER_CFLAGS": [

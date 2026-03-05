@@ -451,6 +451,12 @@ def main(
         val = cfg.get(key)
         return default if val is None else val
 
+    def pick_none_if_zero(key: str, default=None):
+        val = cfg.get(key)
+        if val == 0 or val == 0.0 or val == "0":
+            return None
+        return default if val is None else val
+
     model_name = cfg.get('name') or 'Default'
 
     print(f"[Python] Main function called with acres={acres}, crop_names='{crop_names}', output_json={output_json}")
@@ -728,12 +734,12 @@ def main(
             constraints = LandConstraints(
                 total_land=acres,
                 min_ag_fraction=pick('constraints_min_ag_fraction', 0.51),
-                max_prime_solar=pick('constraints_max_prime_solar', 40.0),
-                zoning_max_solar=pick('constraints_zoning_max_solar', 40.0),
+                max_prime_solar=pick_none_if_zero('constraints_max_prime_solar', None),
+                zoning_max_solar=pick_none_if_zero('constraints_zoning_max_solar', None),
                 setback_fraction=pick('constraints_setback_fraction', 0.10),
                 easement_acres=pick('constraints_easement_acres', 0.0),
                 wetland_exclusion_acres=pick('constraints_wetland_exclusion_acres', 0.0),
-                interconnect_capacity_mw=pick('constraints_interconnect_capacity_mw', 10.0),
+                interconnect_capacity_mw=pick_none_if_zero('constraints_interconnect_capacity_mw', None),
             )
 
             result = optimize_land_allocation(

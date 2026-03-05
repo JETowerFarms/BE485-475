@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <tuple>
+#include <stdexcept>
 
 // Clearing cost data structure (matches data grabber output)
 struct RawClearingData {
