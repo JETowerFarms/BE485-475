@@ -52,6 +52,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 from scipy.optimize import linprog
 import json
+import time
 
 
 @dataclass
@@ -786,6 +787,48 @@ def aggregate_effects(stack):
     }
 
 
+def score_scenario_fast(stack, solar, econ, lease, constraints, developer_retention_fraction):
+    """
+    Quick proxy score for ranking scenarios WITHOUT running the LP solver.
+    Computes the developer NPV with incentives, derives the lease rate,
+    and estimates the farmer NPV.  Higher score = better scenario.
+    This is ~10x faster than evaluate_scenario() because it skips the LP
+    per-crop solves.
+    """
+    effects = aggregate_effects(stack)
+    est_solar_acres = constraints.usable_land()
+
+    _, _, pv_net = compute_solar_pv_with_incentives(
+        solar, econ, effects, est_solar_acres,
+    )
+
+    # Derive lease rate (mirrors evaluate_scenario logic)
+    pv_factor_lease_dev = lease.pv_factor_developer(econ)
+    if pv_factor_lease_dev == 0:
+        return float('-inf')
+
+    ret = max(0.0, min(1.0, developer_retention_fraction))
+    max_lease_pv = (1.0 - ret) * pv_net
+    derived_L = max_lease_pv / pv_factor_lease_dev if pv_net > 0 else 0.0
+
+    L_solar = derived_L
+    if lease.min_rate is not None:
+        L_solar = max(lease.min_rate, L_solar)
+    if lease.max_rate is not None:
+        L_solar = min(lease.max_rate, L_solar)
+
+    # Score: PV of lease per acre (dominant driver of farmer NPV)
+    pv_lease_score = L_solar * lease.pv_factor(econ)
+
+    # Add farmer-side incentive benefits as tiebreaker
+    farmer_boost = (
+        effects['farmer_cost_share_per_acre']
+        + effects['farmer_annual_revenue_per_acre'] * econ.project_life
+    )
+
+    return pv_lease_score + farmer_boost
+
+
 def compute_solar_pv_with_incentives(
     solar: SolarParameters,
     econ: EconomicParameters,
@@ -1258,11 +1301,38 @@ def main(
 
     # ── Generate & evaluate incentive scenarios ──
     eligible_ids = cfg.get('eligible_incentives', None)
+    timeout_seconds = cfg.get('timeout_seconds', 120)
+    start_time = time.time()
+
     scenarios = generate_scenarios(eligible_ids)
     print(f"[Python] Generated {len(scenarios)} incentive scenario combinations")
 
+    # ── Phase 1: Fast-rank ALL scenarios by proxy score (no LP) ──
+    scored = []
+    for i, stack in enumerate(scenarios):
+        if time.time() - start_time > timeout_seconds:
+            raise TimeoutError(
+                f"Optimization timed out after {timeout_seconds}s "
+                f"during scoring phase ({i}/{len(scenarios)} scored)")
+        score = score_scenario_fast(
+            stack, solar, econ, lease, constraints, developer_retention_fraction,
+        )
+        scored.append((score, stack))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # ── Phase 2: Full LP evaluation on only the top N scenarios ──
+    TOP_N = 5  # enough for top-3 reporting even if 1-2 are infeasible
+    top_scenarios = [stack for _, stack in scored[:TOP_N]]
+    print(f"[Python] Fast-ranked {len(scenarios)} scenarios in "
+          f"{time.time() - start_time:.1f}s, evaluating top {len(top_scenarios)} fully")
+
     all_evals = []
-    for stack in scenarios:
+    for stack in top_scenarios:
+        if time.time() - start_time > timeout_seconds:
+            raise TimeoutError(
+                f"Optimization timed out after {timeout_seconds}s "
+                f"during LP evaluation phase")
         crop_results = evaluate_scenario(
             stack, solar, econ, selected_crops, lease, farmer, constraints,
             developer_retention_fraction,
@@ -1270,7 +1340,8 @@ def main(
         if crop_results:
             all_evals.append(crop_results)
 
-    print(f"[Python] {len(all_evals)} scenarios produced valid results")
+    elapsed = time.time() - start_time
+    print(f"[Python] {len(all_evals)} scenarios produced valid results in {elapsed:.1f}s")
 
     # ── Rank by farmer NPV and select top 3 per crop ──
     results = {}
@@ -1342,15 +1413,19 @@ if __name__ == "__main__":
         print("[Python] ERROR: Provide at least --crops or --crop-data")
         sys.exit(1)
 
-    result = main(
-        acres=args.acres,
-        crop_names=args.crops or '',
-        pvwatts_response_path=None,
-        pvwatts_data=pvwatts_data,
-        output_json=args.json,
-        crop_data=crop_data_json,
-        model_config=model_config_json,
-    )
+    try:
+        result = main(
+            acres=args.acres,
+            crop_names=args.crops or '',
+            pvwatts_response_path=None,
+            pvwatts_data=pvwatts_data,
+            output_json=args.json,
+            crop_data=crop_data_json,
+            model_config=model_config_json,
+        )
+    except TimeoutError as exc:
+        result = {"error": "timeout", "message": str(exc)}
+        print(f"[Python] TIMEOUT: {exc}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(result))

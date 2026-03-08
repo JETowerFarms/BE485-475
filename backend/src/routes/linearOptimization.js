@@ -148,7 +148,7 @@ function buildModelConfig(row) {
   return cfg;
 }
 
-async function runPython({ acres, crops, cropData, pvwattsData, modelConfig }) {
+async function runPython({ acres, crops, cropData, pvwattsData, modelConfig, timeoutMs = 130000 }) {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, '..', 'agrivoltaics_model.py');
     const args = [
@@ -171,6 +171,13 @@ async function runPython({ acres, crops, cropData, pvwattsData, modelConfig }) {
 
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+
+    // Kill the process if it exceeds the timeout
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGKILL');
+    }, timeoutMs);
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -181,10 +188,17 @@ async function runPython({ acres, crops, cropData, pvwattsData, modelConfig }) {
     });
 
     proc.on('error', (err) => {
+      clearTimeout(timer);
       reject(err);
     });
 
     proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        const err = new Error('Optimization timed out — the model did not finish within the allowed time. Try selecting fewer incentive programs.');
+        err.statusCode = 504;
+        return reject(err);
+      }
       if (code !== 0) {
         const err = new Error(`Python optimizer failed with code ${code}: ${stderr || stdout}`);
         err.statusCode = 500;
@@ -192,6 +206,12 @@ async function runPython({ acres, crops, cropData, pvwattsData, modelConfig }) {
       }
       try {
         const parsed = JSON.parse(stdout.trim().split('\n').pop());
+        // Check for Python-side timeout error
+        if (parsed && parsed.error === 'timeout') {
+          const err = new Error(parsed.message || 'Optimization timed out');
+          err.statusCode = 504;
+          return reject(err);
+        }
         resolve({ parsed, stdout, stderr });
       } catch (parseErr) {
         const err = new Error(`Failed to parse optimizer output: ${parseErr.message}`);
