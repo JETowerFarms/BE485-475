@@ -57,17 +57,26 @@ import json
 @dataclass
 class EconomicParameters:
     """Global economic and escalation parameters."""
-    discount_rate: float  # annual discount rate (real)
-    inflation_rate: float  # annual inflation rate (ignored for real calculations)
-    electricity_escalation: float  # annual escalation rate for electricity price
-    crop_escalation: float  # annual escalation rate for crop price
+    discount_rate: float  # annual discount rate (real) — farmer-side NPV
+    inflation_rate: float  # annual inflation rate (informational — model uses real terms)
+    electricity_escalation: float  # annual real escalation rate for electricity price
+    crop_escalation: float  # annual real escalation rate for crop price
     project_life: int  # project lifetime in years (27 = 2 construction + 25 operating)
+    developer_discount_rate: Optional[float] = None  # developer real WACC (None = use discount_rate)
+    developer_tax_rate: float = 0.257  # combined federal (21%) + state (~6%) corporate tax rate
 
     @property
     def discount_factors(self) -> np.ndarray:
-        """Return a vector of discount factors 1/(1+r)^t for t=0..T."""
+        """Return discount factors 1/(1+r)^t for t=0..T using farmer rate."""
         T = self.project_life
         r = self.discount_rate
+        return np.array([1 / ((1 + r) ** t) for t in range(T + 1)])
+
+    @property
+    def developer_discount_factors(self) -> np.ndarray:
+        """Return discount factors using the developer's WACC (lower = cheaper capital)."""
+        T = self.project_life
+        r = self.developer_discount_rate if self.developer_discount_rate is not None else self.discount_rate
         return np.array([1 / ((1 + r) ** t) for t in range(T + 1)])
 
 
@@ -79,8 +88,13 @@ class LeaseParameters:
     escalation_rate: float = 0.0  # real escalation for lease, per year
 
     def pv_factor(self, econ: EconomicParameters) -> float:
-        """Present value factor for a $1/acre-yr lease from t=1..T."""
+        """Present value factor for a $1/acre-yr lease from t=1..T (farmer rate)."""
         df = econ.discount_factors
+        return float(sum(df[t] * ((1 + self.escalation_rate) ** t) for t in range(1, econ.project_life + 1)))
+
+    def pv_factor_developer(self, econ: EconomicParameters) -> float:
+        """Present value factor using the developer's discount rate."""
+        df = econ.developer_discount_factors
         return float(sum(df[t] * ((1 + self.escalation_rate) ** t) for t in range(1, econ.project_life + 1)))
 
 
@@ -109,31 +123,64 @@ class SolarParameters:
     availability_factor: float = 1.0  # fraction of uptime (availability)
     curtailment_factor: float = 1.0  # fraction not curtailed
     export_factor: float = 1.0  # fraction exportable to grid
+    construction_interest_rate: float = 0.065  # interest during construction (IDC)
+    # ── Improvement: O&M and OPEX escalation ──
+    oandm_escalation_rate: float = 0.0075  # real annual O&M escalation (NREL: 0.5-1.0%)
+    opex_escalation_rate: float = 0.005  # real annual escalation for veg+insurance (2-3% nom)
+    # ── Improvement: Explicit property tax ──
+    property_tax_per_kw: float = 0.0  # $/kWac-yr (set to 0 when PA108 exemption applies)
+    property_tax_escalation: float = 0.01  # real annual escalation
+    # ── Improvement: PPA pricing with merchant tail ──
+    ppa_price_kwh: float = 0.0  # $/kWh PPA price (0 = use electricity_price_0 escalation)
+    ppa_years: int = 0  # PPA term in years from COD (0 = no PPA, use escalated price)
+    merchant_discount: float = 0.20  # post-PPA merchant price discount vs escalated price
+    # ── Improvement: Simplified debt structure ──
+    debt_fraction: float = 0.0  # fraction of capex financed with debt (0 = all-equity)
+    debt_interest_rate: float = 0.07  # nominal interest rate on term debt
+    debt_term_years: int = 18  # amortization period
+    # ── Improvement: Development soft costs ──
+    soft_cost_fraction: float = 0.05  # soft costs as fraction of installed_cost_per_MW
+    # ── Improvement: DC:AC ratio (ILR) ──
+    dc_ac_ratio: float = 1.0  # DC nameplate / AC nameplate (1.34 typical; 1.0 = no clipping)
+    # ── Improvement: Working capital reserve ──
+    working_capital_months: float = 0.0  # months of OPEX held in reserve (0 = none)
+    # ── Improvement: Curtailment trend ──
+    curtailment_annual_increase: float = 0.0  # annual increase in curtailment fraction
 
     @property
     def energy_per_MW_year(self) -> float:
-        """Annual energy production per MWac in kWh for the first year."""
-        # 8760 hours/year × capacity factor × 1000 kW/MW
-        return 8760 * self.capacity_factor * 1000
+        """Annual energy production per MWac in kWh for the first year.
 
-    def net_energy(self, t: int) -> float:
-        """Net energy in year t (kWh per MW) accounting for degradation and derates."""
-        derate = self.availability_factor * self.curtailment_factor * self.export_factor
-        return self.energy_per_MW_year * ((1 - self.degradation_rate) ** t) * derate
+        If dc_ac_ratio > 1.0 (oversized DC field), production increases up to
+        a clipping limit of ~15% above nameplate AC.  The simplified approach
+        is: extra_dc = min(dc_ac_ratio, 1.15) — i.e., a 1.34 ILR yields ~15%
+        more energy but clipping prevents anything above ~15%.
+        """
+        dc_boost = min(self.dc_ac_ratio, 1.15) if self.dc_ac_ratio > 1.0 else 1.0
+        return 8760 * self.capacity_factor * 1000 * dc_boost
+
+    def net_energy(self, t: int, cod_year: int = 2) -> float:
+        """Net energy in year t (kWh per MW) accounting for degradation, derates,
+        and increasing curtailment over time.
+        """
+        op_year = max(0, t - cod_year)
+        # Curtailment grows over time (solar penetration increase in MISO)
+        effective_curtailment = max(0.0, self.curtailment_factor - self.curtailment_annual_increase * op_year)
+        derate = self.availability_factor * effective_curtailment * self.export_factor
+        return self.energy_per_MW_year * ((1 - self.degradation_rate) ** op_year) * derate
 
     def price_electricity(self, t: int, econ: EconomicParameters) -> float:
         """Electricity price ($/kWh) in year t."""
         return self.electricity_price_0 * ((1 + econ.electricity_escalation) ** t)
 
     def capex_per_acre(self) -> float:
-        """Compute the upfront CAPEX per acre (year 0)."""
-        # Convert installed cost per MW to per acre using α
-        # Include interconnection fraction on the construction portion
+        """Compute the upfront CAPEX per acre (year 0), including soft costs."""
         const_per_acre = self.installed_cost_per_MW / self.land_intensity_acres_per_MW
         inter_upgrade = self.interconnection_fraction * const_per_acre
+        soft_costs = self.soft_cost_fraction * const_per_acre
         return (const_per_acre + self.site_prep_cost_per_acre +
                 self.grading_cost_per_acre + self.retilling_cost_per_acre +
-                self.bond_cost_per_acre + inter_upgrade)
+                self.bond_cost_per_acre + inter_upgrade + soft_costs)
 
     def opex_per_acre(self) -> float:
         """Compute the annual OPEX per acre (excluding lease)."""
@@ -224,6 +271,89 @@ class FarmerParameters:
     pa116_credit_per_acre: float = 0.0  # $/acre-yr (if applicable)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Incentive Modeling
+# ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class IncentiveDefinition:
+    """Describes a financial incentive program with its quantified effect."""
+    id: str
+    name: str
+    category: str
+    description: str
+    eligibility: str
+    group: str  # itc_base | itc_adder | ptc | federal_grant | state | conservation | regulatory
+    # Developer-side effects
+    itc_override: Optional[float] = None
+    itc_bonus: float = 0.0
+    ptc_per_kwh: float = 0.0
+    ptc_years: int = 0
+    capex_grant_fraction: float = 0.0
+    capex_grant_cap: float = float('inf')
+    capex_flat_reduction: float = 0.0
+    opex_savings_per_mw_yr: float = 0.0
+    # Depreciation
+    depreciation_100pct: bool = False  # 100% bonus depreciation (MACRS)
+    depreciation_tax_rate: float = 0.21  # Federal corporate tax rate
+    # Market revenue (RECs)
+    rec_per_mwh: float = 0.0  # $/MWh REC revenue (stackable with ITC or PTC)
+    rec_years: int = 0  # Number of years RECs are sold (0 = project life)
+    # Community-side effects (passed through to developer viability)
+    community_payment_per_mw: float = 0.0  # One-time $/MW to host community
+    # Farmer-side effects
+    farmer_cost_share_per_acre: float = 0.0
+    farmer_annual_revenue_per_acre: float = 0.0
+    farmer_annual_cost_per_acre: float = 0.0
+
+
+# Incentive catalog — populated at runtime from DB via model config.
+# No hardcoded incentives; all definitions live in the 'incentives' table.
+INCENTIVE_BY_ID: Dict[str, 'IncentiveDefinition'] = {}
+
+# Mutual-exclusion groups: incentives sharing the same group string cannot
+# appear together in a scenario.  Populated from DB 'mutual_exclusion_group' column.
+# { group_name: set(incentive_id, ...) }
+MUTUAL_EXCLUSION_GROUPS: Dict[str, set] = {}
+
+
+def _build_catalog_from_defs(defs: list) -> tuple:
+    """Reconstruct INCENTIVE_BY_ID and MUTUAL_EXCLUSION_GROUPS from raw dicts
+    passed from the DB via model config.
+
+    Returns (incentive_by_id, mutual_exclusion_groups).
+    """
+    result = {}
+    mutex_groups: Dict[str, set] = {}
+    for d in defs:
+        d = dict(d)
+        # DB stores as incentive_group; IncentiveDefinition dataclass uses 'group'
+        if 'incentive_group' in d:
+            d['group'] = d.pop('incentive_group')
+        # DB NULL for capex_grant_cap means no cap (Python uses float('inf'))
+        if d.get('capex_grant_cap') is None:
+            d['capex_grant_cap'] = float('inf')
+        # Extract mutex/requires metadata before stripping
+        mutex_grp = d.pop('mutual_exclusion_group', None)
+        d.pop('requires_group', None)
+        # Strip DB-only fields not in the dataclass
+        for key in ('active', 'sort_order', 'configurable'):
+            d.pop(key, None)
+        try:
+            obj = IncentiveDefinition(**d)
+            result[obj.id] = obj
+            if mutex_grp:
+                mutex_groups.setdefault(mutex_grp, set()).add(obj.id)
+        except TypeError as e:
+            print(f"[Python] Warning: skipping incentive {d.get('id', '?')}: {e}")
+    return result, mutex_groups
+
+
+# Standard MACRS 5-year depreciation schedule (200% DB, half-year convention)
+# Applies to all commercial solar as IRC §168 property; 6 tax years for 5-year class.
+MACRS_5YR = [0.2000, 0.3200, 0.1920, 0.1152, 0.1152, 0.0576]
+
+
 def present_value_stream(values: List[float], econ: EconomicParameters) -> float:
     """Compute the present value of a stream of values given EconomicParameters."""
     df = econ.discount_factors
@@ -233,28 +363,105 @@ def present_value_stream(values: List[float], econ: EconomicParameters) -> float
 
 
 def compute_solar_pv_no_lease(solar: SolarParameters, econ: EconomicParameters) -> Tuple[float, float, float]:
-    """Return (pv_revenue, pv_cost, pv_net) per acre for solar without lease."""
+    """Return (pv_revenue, pv_cost, pv_net) per acre for solar without lease.
+
+    Uses developer discount rate and includes:
+      - Construction interest (IDC)
+      - Standard MACRS 5-year depreciation tax shield
+      - O&M and OPEX escalation
+      - Explicit property tax (with escalation)
+      - PPA pricing with merchant tail
+      - Simplified debt service
+      - Working capital reserve
+      - DC:AC ratio boost
+      - Increasing curtailment
+      - Soft costs in CAPEX basis
+    """
     T = econ.project_life
-    df = econ.discount_factors
+    df = econ.developer_discount_factors
 
     revenues = [0.0] * (T + 1)
     costs = [0.0] * (T + 1)
 
-    # Construction costs in years 0 and 1 (no ITC applied yet)
-    capex_per_year = solar.capex_per_acre() / 2  # Split construction costs over 2 years
-    costs[0] = capex_per_year
-    costs[1] = capex_per_year
+    capex = solar.capex_per_acre()
 
-    # ITC benefit applied at year 2 (placed in service)
-    itc_benefit = solar.capex_per_acre() * solar.itc_rate
-    revenues[2] = itc_benefit  # ITC treated as a revenue inflow
+    # ── Construction financing: interest during construction (NREL ATB method) ──
+    con_fin_factor = 1.0
+    if solar.construction_interest_rate > 0:
+        idc = solar.construction_interest_rate
+        tr = econ.developer_tax_rate
+        ai_0 = (1 - tr) * ((1 + idc) ** 1.5 - 1)
+        ai_1 = (1 - tr) * ((1 + idc) ** 0.5 - 1)
+        con_fin_factor = 0.5 * (1 + ai_0) + 0.5 * (1 + ai_1)
 
-    opex = solar.opex_per_acre()
-    for t in range(2, T + 1):  # Operating expenses start from year 2
+    cash_capex = capex * con_fin_factor
+    costs[0] = cash_capex / 2
+    costs[1] = cash_capex / 2
+
+    # ── Working capital reserve ── (returned at end of life)
+    if solar.working_capital_months > 0:
+        wc = solar.opex_per_acre() * (solar.working_capital_months / 12.0)
+        costs[1] += wc          # reserve funded at end of construction
+        revenues[T] += wc       # reserve returned at decommission
+
+    # ITC benefit at year 2 (placed in service)
+    itc_benefit = capex * solar.itc_rate
+    revenues[2] = itc_benefit
+
+    # Standard MACRS 5-year depreciation (bonus handled in incentive path)
+    depreciable_basis = capex * (1.0 - solar.itc_rate / 2.0)  # IRC §50(c)(3)
+    for i, rate in enumerate(MACRS_5YR):
+        yr = 2 + i
+        if yr <= T:
+            revenues[yr] += depreciable_basis * rate * econ.developer_tax_rate
+
+    # ── Debt service ── (simple annual mortgage-style payment)
+    annual_debt_service = 0.0
+    if solar.debt_fraction > 0 and solar.debt_term_years > 0:
+        debt_principal = capex * solar.debt_fraction
+        r_debt = solar.debt_interest_rate
+        n_debt = solar.debt_term_years
+        if r_debt > 0:
+            annual_debt_service = debt_principal * (r_debt * (1 + r_debt) ** n_debt) / ((1 + r_debt) ** n_debt - 1)
+        else:
+            annual_debt_service = debt_principal / n_debt
+        # Equity portion of construction cost replaces full cash_capex
+        equity_capex = capex * (1.0 - solar.debt_fraction) * con_fin_factor
+        costs[0] = equity_capex / 2
+        costs[1] = equity_capex / 2
+        if solar.working_capital_months > 0:
+            costs[1] += solar.opex_per_acre() * (solar.working_capital_months / 12.0)
+
+    # ── Operating years ──
+    base_opex = solar.opex_per_acre()
+    base_oandm = solar.oandm_cost_per_kw * 1000 / solar.land_intensity_acres_per_MW
+    base_veg_ins = solar.vegetation_cost_per_acre + solar.insurance_cost_per_acre
+    base_prop_tax = solar.property_tax_per_kw * 1000 / solar.land_intensity_acres_per_MW
+    ppa_end = 2 + solar.ppa_years if solar.ppa_years > 0 else 0
+
+    for t in range(2, T + 1):
+        op_yr = t - 2
         energy = solar.net_energy(t) / solar.land_intensity_acres_per_MW
-        price = solar.price_electricity(t, econ)
+
+        # ── Revenue: PPA or escalated price ──
+        if solar.ppa_price_kwh > 0 and solar.ppa_years > 0:
+            if t < ppa_end:
+                # PPA rate (fixed, no escalation in real terms for simplicity)
+                price = solar.ppa_price_kwh
+            else:
+                # Merchant tail: escalated price with discount
+                esc_price = solar.price_electricity(t, econ)
+                price = esc_price * (1.0 - solar.merchant_discount)
+        else:
+            price = solar.price_electricity(t, econ)
+
         revenues[t] += energy * price
-        costs[t] = opex
+
+        # ── Costs: O&M with escalation, property tax, debt service ──
+        oandm = base_oandm * ((1 + solar.oandm_escalation_rate) ** op_yr)
+        veg_ins = base_veg_ins * ((1 + solar.opex_escalation_rate) ** op_yr)
+        prop_tax = base_prop_tax * ((1 + solar.property_tax_escalation) ** op_yr)
+        costs[t] = oandm + veg_ins + prop_tax + annual_debt_service
 
     if 0 < solar.replacement_year <= T:
         costs[solar.replacement_year] += solar.replacement_cost_per_acre()
@@ -421,8 +628,428 @@ def optimize_land_allocation(
         "usable_land": usable_land,
         "crop_land": crop_land,
         "max_solar": max_solar,
+        "interconnect_capacity_mw": constraints.interconnect_capacity_mw,
+        "constraints_min_ag_fraction": constraints.min_ag_fraction,
+        "constraints_setback_fraction": constraints.setback_fraction,
     }
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Incentive Scenario Generation & Evaluation
+# ═══════════════════════════════════════════════════════════════════
+
+def _powerset(items):
+    """Return all subsets of *items* as a list of lists."""
+    result = [[]]
+    for item in items:
+        result += [combo + [item] for combo in result]
+    return result
+
+
+def generate_scenarios(eligible_ids=None):
+    """
+    Generate all valid incentive stack combinations.
+
+    Returns a list of lists where each inner list is a set of
+    IncentiveDefinition objects representing one scenario.
+
+    Mutual-exclusivity rules (data-driven from MUTUAL_EXCLUSION_GROUPS):
+      * ITC vs PTC (cannot combine)
+      * Incentives in the same mutual_exclusion_group cannot co-exist
+      * ITC adders only valid with ITC base
+      * Total ITC capped at 70%
+    """
+    catalog = INCENTIVE_BY_ID
+    if eligible_ids is not None:
+        eligible = {k: v for k, v in catalog.items() if k in eligible_ids}
+    else:
+        # Default: exclude brownfield-specific and competitive programs
+        exclude_default = {'brownfield_egle', 'act381_brownfield_tif', 'itc_low_income_20'}
+        eligible = {k: v for k, v in catalog.items() if k not in exclude_default}
+
+    itc_bases   = [v for v in eligible.values() if v.group == 'itc_base']
+    itc_adders  = [v for v in eligible.values() if v.group == 'itc_adder']
+    ptc_options = [v for v in eligible.values() if v.group == 'ptc']
+    fed_grants  = [v for v in eligible.values() if v.group == 'federal_grant']
+    state_progs = [v for v in eligible.values() if v.group == 'state']
+    conservation = [v for v in eligible.values() if v.group == 'conservation']
+    depreciation = [v for v in eligible.values() if v.group == 'depreciation']
+    market       = [v for v in eligible.values() if v.group == 'market']
+    # Always-on groups: depreciation and market (RECs) are added to every stack
+    always_on = depreciation + market
+
+    # Build a lookup: incentive_id -> set of mutex peer ids
+    mutex_lookup: Dict[str, set] = {}
+    for grp_name, members in MUTUAL_EXCLUSION_GROUPS.items():
+        for mid in members:
+            mutex_lookup.setdefault(mid, set()).update(members - {mid})
+
+    def no_mutex_violation(combo):
+        """Return True if no two incentives in combo share a mutual-exclusion group."""
+        ids = {i.id for i in combo}
+        for iid in ids:
+            if iid in mutex_lookup and ids & mutex_lookup[iid]:
+                return False
+        return True
+
+    scenarios = []
+
+    # ── ITC-based scenarios ──
+    for base in itc_bases:
+        for adders in _powerset(itc_adders):
+            if not no_mutex_violation(adders):
+                continue
+            total_itc = (base.itc_override or 0) + sum(a.itc_bonus for a in adders)
+            if total_itc > 0.70:
+                continue
+            for grants in _powerset(fed_grants):
+                if not no_mutex_violation(grants):
+                    continue
+                for st in _powerset(state_progs):
+                    for cons in _powerset(conservation):
+                        scenarios.append([base] + adders + grants + always_on + st + cons)
+
+    # ── PTC-based scenarios (no ITC adders) ──
+    for ptc in ptc_options:
+        for grants in _powerset(fed_grants):
+            if not no_mutex_violation(grants):
+                continue
+            for st in _powerset(state_progs):
+                for cons in _powerset(conservation):
+                    scenarios.append([ptc] + grants + always_on + st + cons)
+
+    return scenarios
+
+
+def aggregate_effects(stack):
+    """Combine financial effects from all incentives in a stack."""
+    eff_itc = 0.0
+    use_ptc = False
+    ptc_rate = 0.0
+    ptc_years = 0
+    capex_grant_frac = 0.0
+    capex_grant_cap = float('inf')
+    capex_flat = 0.0
+    opex_savings = 0.0
+    has_depreciation = False
+    depreciation_tax_rate = 0.21
+    rec_per_mwh = 0.0
+    rec_years = 0
+    community_payment_per_mw = 0.0
+    farmer_cs = 0.0
+    farmer_rev = 0.0
+    farmer_cost = 0.0
+
+    for inc in stack:
+        if inc.itc_override is not None:
+            eff_itc = inc.itc_override
+        eff_itc += inc.itc_bonus
+        if inc.ptc_per_kwh > 0:
+            use_ptc = True
+            ptc_rate = inc.ptc_per_kwh
+            ptc_years = inc.ptc_years
+            eff_itc = 0.0
+        capex_grant_frac += inc.capex_grant_fraction
+        if inc.capex_grant_cap < capex_grant_cap:
+            capex_grant_cap = inc.capex_grant_cap
+        capex_flat += inc.capex_flat_reduction
+        opex_savings += inc.opex_savings_per_mw_yr
+        if inc.depreciation_100pct:
+            has_depreciation = True
+            depreciation_tax_rate = inc.depreciation_tax_rate
+        if inc.rec_per_mwh > 0:
+            rec_per_mwh = max(rec_per_mwh, inc.rec_per_mwh)  # Take best REC price
+            rec_years = inc.rec_years
+        community_payment_per_mw += inc.community_payment_per_mw
+        farmer_cs += inc.farmer_cost_share_per_acre
+        farmer_rev += inc.farmer_annual_revenue_per_acre
+        farmer_cost += inc.farmer_annual_cost_per_acre
+
+    return {
+        'effective_itc': min(eff_itc, 0.70),
+        'use_ptc': use_ptc,
+        'ptc_rate': ptc_rate,
+        'ptc_years': ptc_years,
+        'capex_grant_fraction': min(capex_grant_frac, 0.50),
+        'capex_grant_cap': capex_grant_cap if capex_grant_cap < float('inf') else None,
+        'capex_flat_reduction': capex_flat,
+        'opex_savings_per_mw_yr': opex_savings,
+        'has_depreciation': has_depreciation,
+        'depreciation_tax_rate': depreciation_tax_rate,
+        'rec_per_mwh': rec_per_mwh,
+        'rec_years': rec_years,
+        'community_payment_per_mw': community_payment_per_mw,
+        'farmer_cost_share_per_acre': farmer_cs,
+        'farmer_annual_revenue_per_acre': farmer_rev,
+        'farmer_annual_cost_per_acre': farmer_cost,
+    }
+
+
+def compute_solar_pv_with_incentives(
+    solar: SolarParameters,
+    econ: EconomicParameters,
+    effects: dict,
+    est_solar_acres: float,
+) -> Tuple[float, float, float]:
+    """
+    Developer NPV per acre accounting for CAPEX grants, ITC/PTC choice,
+    depreciation (bonus or standard MACRS), construction interest (IDC),
+    O&M and OPEX escalation, property tax, PPA/merchant pricing,
+    debt service, working capital, and annual opex savings from incentives.
+    Returns (pv_revenue, pv_cost, pv_net) per acre.
+    Uses developer discount rate.
+    """
+    T = econ.project_life
+    df = econ.developer_discount_factors
+    revenues = [0.0] * (T + 1)
+    costs = [0.0] * (T + 1)
+
+    capex = solar.capex_per_acre()
+
+    # ── CAPEX grant reductions (reduce basis before ITC) ──
+    grant_per_acre = 0.0
+    if effects['capex_grant_fraction'] > 0 and est_solar_acres > 0:
+        total_capex = capex * est_solar_acres
+        cap = effects['capex_grant_cap'] or float('inf')
+        grant = min(total_capex * effects['capex_grant_fraction'], cap)
+        grant_per_acre = grant / est_solar_acres
+    if effects['capex_flat_reduction'] > 0 and est_solar_acres > 0:
+        grant_per_acre += effects['capex_flat_reduction'] / est_solar_acres
+
+    net_capex = max(0.0, capex - grant_per_acre)
+
+    # ── Construction financing: interest during construction (NREL ATB method) ──
+    con_fin_factor = 1.0
+    if solar.construction_interest_rate > 0:
+        idc = solar.construction_interest_rate
+        tr = econ.developer_tax_rate
+        ai_0 = (1 - tr) * ((1 + idc) ** 1.5 - 1)
+        ai_1 = (1 - tr) * ((1 + idc) ** 0.5 - 1)
+        con_fin_factor = 0.5 * (1 + ai_0) + 0.5 * (1 + ai_1)
+
+    cash_capex = net_capex * con_fin_factor
+    costs[0] = cash_capex / 2
+    costs[1] = cash_capex / 2
+
+    # ── Working capital reserve ── (returned at end of life)
+    if solar.working_capital_months > 0:
+        wc = solar.opex_per_acre() * (solar.working_capital_months / 12.0)
+        costs[1] += wc
+        revenues[T] += wc
+
+    # ── Tax credit ──
+    if effects['use_ptc']:
+        for t in range(2, min(2 + effects['ptc_years'], T + 1)):
+            energy_kwh = solar.net_energy(t) / solar.land_intensity_acres_per_MW
+            revenues[t] += energy_kwh * effects['ptc_rate']
+    else:
+        itc_benefit = net_capex * effects['effective_itc']
+        revenues[2] = itc_benefit
+
+    # ── Depreciation tax shield (bonus or standard MACRS) ──
+    eff_itc = effects['effective_itc'] if not effects['use_ptc'] else 0.0
+    depreciable_basis = net_capex * (1.0 - eff_itc / 2.0)  # IRC §50(c)(3)
+    tax_rate = econ.developer_tax_rate
+    if effects.get('has_depreciation'):
+        revenues[2] += depreciable_basis * tax_rate
+    else:
+        for i, rate in enumerate(MACRS_5YR):
+            yr = 2 + i
+            if yr <= T:
+                revenues[yr] += depreciable_basis * rate * tax_rate
+
+    # ── Debt service ── (mortgage-style annual payment on net_capex)
+    annual_debt_service = 0.0
+    if solar.debt_fraction > 0 and solar.debt_term_years > 0:
+        debt_principal = net_capex * solar.debt_fraction
+        r_debt = solar.debt_interest_rate
+        n_debt = solar.debt_term_years
+        if r_debt > 0:
+            annual_debt_service = debt_principal * (r_debt * (1 + r_debt) ** n_debt) / ((1 + r_debt) ** n_debt - 1)
+        else:
+            annual_debt_service = debt_principal / n_debt
+        # Equity portion replaces full cash_capex
+        equity_capex = net_capex * (1.0 - solar.debt_fraction) * con_fin_factor
+        costs[0] = equity_capex / 2
+        costs[1] = equity_capex / 2
+        if solar.working_capital_months > 0:
+            costs[1] += solar.opex_per_acre() * (solar.working_capital_months / 12.0)
+
+    # ── REC revenue (stackable with ITC/PTC) ──
+    if effects.get('rec_per_mwh', 0) > 0:
+        rec_years = effects['rec_years'] or T
+        rec_end = min(2 + rec_years, T + 1)
+        for t in range(2, rec_end):
+            energy_mwh = solar.net_energy(t) / solar.land_intensity_acres_per_MW / 1000.0
+            revenues[t] += energy_mwh * effects['rec_per_mwh']
+
+    # ── Community payment offset (RRCA) ──
+    if effects.get('community_payment_per_mw', 0) > 0:
+        mw_per_acre = 1.0 / solar.land_intensity_acres_per_MW
+        community_offset = effects['community_payment_per_mw'] * mw_per_acre
+        revenues[0] += community_offset / 2
+        revenues[2] += community_offset / 2
+
+    # ── Operating revenue and costs (with escalation) ──
+    base_oandm = solar.oandm_cost_per_kw * 1000 / solar.land_intensity_acres_per_MW
+    base_veg_ins = solar.vegetation_cost_per_acre + solar.insurance_cost_per_acre
+    base_prop_tax = solar.property_tax_per_kw * 1000 / solar.land_intensity_acres_per_MW
+    opex_savings_per_acre = effects['opex_savings_per_mw_yr'] / solar.land_intensity_acres_per_MW
+    ppa_end = 2 + solar.ppa_years if solar.ppa_years > 0 else 0
+
+    for t in range(2, T + 1):
+        op_yr = t - 2
+        energy_kwh = solar.net_energy(t) / solar.land_intensity_acres_per_MW
+
+        # ── Revenue: PPA or escalated price ──
+        if solar.ppa_price_kwh > 0 and solar.ppa_years > 0:
+            if t < ppa_end:
+                price = solar.ppa_price_kwh
+            else:
+                esc_price = solar.price_electricity(t, econ)
+                price = esc_price * (1.0 - solar.merchant_discount)
+        else:
+            price = solar.price_electricity(t, econ)
+
+        revenues[t] += energy_kwh * price
+
+        # ── Costs: escalated O&M, property tax, debt service, minus savings ──
+        oandm = base_oandm * ((1 + solar.oandm_escalation_rate) ** op_yr)
+        veg_ins = base_veg_ins * ((1 + solar.opex_escalation_rate) ** op_yr)
+        prop_tax = base_prop_tax * ((1 + solar.property_tax_escalation) ** op_yr)
+        annual_opex = oandm + veg_ins + prop_tax + annual_debt_service
+        costs[t] = max(0.0, annual_opex - opex_savings_per_acre)
+
+    if 0 < solar.replacement_year <= T:
+        costs[solar.replacement_year] += solar.replacement_cost_per_acre()
+    costs[T] += solar.decommission_cost_per_acre()
+
+    pv_revenue = float(sum(revenues[t] * df[t] for t in range(T + 1)))
+    pv_cost = float(sum(costs[t] * df[t] for t in range(T + 1)))
+    pv_net = pv_revenue - pv_cost
+    return pv_revenue, pv_cost, pv_net
+
+
+def build_scenario_label(stack):
+    """Build a compact human-readable label for a scenario stack."""
+    itc = 0.0
+    use_ptc = False
+    SHORT = {
+        'reap_25': 'REAP25', 'reap_50': 'REAP50',
+        'pa108_solar_exemption': 'PA108', 'egle_ag_grant': 'EGLE',
+        'mdard_regen_grant': 'MDARD', 'brownfield_egle': 'Brownfield',
+        'eqip_pollinator': 'EQIP', 'crp_conservation': 'CRP',
+        'rec_revenue': 'REC', 'rrca_community': 'RRCA',
+        'csp_stewardship': 'CSP', 'act381_brownfield_tif': 'Act381',
+        'bonus_depreciation': 'BonusDep',
+    }
+    extras = []
+    for inc in stack:
+        if inc.group == 'regulatory':
+            continue
+        if inc.itc_override is not None:
+            itc = inc.itc_override
+        itc += inc.itc_bonus
+        if inc.ptc_per_kwh > 0:
+            use_ptc = True
+        if inc.id in SHORT:
+            extras.append(SHORT[inc.id])
+
+    parts = []
+    if use_ptc:
+        parts.append('PTC')
+    elif itc > 0:
+        parts.append(f'ITC {int(min(itc, 0.70) * 100)}%')
+    parts.extend(extras)
+    return ' + '.join(parts) if parts else 'Baseline'
+
+
+def evaluate_scenario(
+    stack,
+    solar: SolarParameters,
+    econ: EconomicParameters,
+    crops: List[CropParameters],
+    lease: LeaseParameters,
+    farmer: FarmerParameters,
+    constraints: LandConstraints,
+    developer_retention_fraction: float,
+) -> Optional[dict]:
+    """
+    Evaluate a single incentive stack: compute modified developer economics,
+    derive lease rate, run LP for each crop, return results or None on failure.
+    """
+    effects = aggregate_effects(stack)
+    est_solar_acres = constraints.usable_land()
+
+    # Developer economics with incentives (uses developer discount rate)
+    pv_rev, pv_cost, pv_net = compute_solar_pv_with_incentives(
+        solar, econ, effects, est_solar_acres,
+    )
+
+    # Derive lease rate from developer NPV using developer's discount rate
+    pv_factor_lease_dev = lease.pv_factor_developer(econ)
+    if pv_factor_lease_dev == 0:
+        return None
+    ret = max(0.0, min(1.0, developer_retention_fraction))
+    max_lease_pv = (1.0 - ret) * pv_net
+    derived_L = max_lease_pv / pv_factor_lease_dev if pv_net > 0 else 0.0
+
+    L_solar = derived_L
+    if lease.min_rate is not None:
+        L_solar = max(lease.min_rate, L_solar)
+    if lease.max_rate is not None:
+        L_solar = min(lease.max_rate, L_solar)
+
+    # Farmer-side annual adjustments (CRP revenue, PA 116 cost, etc.)
+    net_farmer_annual = (effects['farmer_annual_revenue_per_acre']
+                         - effects['farmer_annual_cost_per_acre'])
+    modified_farmer = FarmerParameters(
+        pa116_credit_per_acre=farmer.pa116_credit_per_acre + net_farmer_annual,
+    )
+
+    # Scenario metadata
+    label = build_scenario_label(stack)
+    incentives_applied = [
+        {
+            'id': inc.id,
+            'name': inc.name,
+            'category': inc.category,
+            'description': inc.description,
+        }
+        for inc in stack if inc.group != 'regulatory'
+    ]
+
+    crop_results = {}
+    for crop in crops:
+        try:
+            result = optimize_land_allocation(
+                solar=solar, econ=econ, crops=[crop], lease=lease,
+                farmer=modified_farmer, constraints=constraints, L_solar=L_solar,
+            )
+        except RuntimeError:
+            continue
+
+        # EQIP one-time cost-share benefit on solar acres
+        eqip_bonus = effects['farmer_cost_share_per_acre'] * result['A_s']
+        result['objective_farmer_NPV'] += eqip_bonus
+        result['eqip_one_time_benefit'] = round(eqip_bonus, 2)
+
+        # Override developer PV values with incentive-aware computation
+        result['pv_solar_net_per_acre_no_lease'] = pv_net
+        result['pv_solar_net_per_acre_after_lease'] = pv_net - (L_solar * pv_factor_lease_dev)
+
+        # Attach incentive metadata
+        result['scenario_name'] = label
+        result['incentives_applied'] = incentives_applied
+        result['effective_itc'] = effects['effective_itc']
+        result['use_ptc'] = effects['use_ptc']
+
+        crop_results[crop.name] = result
+
+    if not crop_results:
+        return None
+    return crop_results
 
 
 def main(
@@ -447,15 +1074,28 @@ def main(
     import json
     cfg = model_config or {}
 
-    def pick(key: str, default):
+    def pick(key: str):
+        """Require a model config key — raises if missing/None."""
         val = cfg.get(key)
-        return default if val is None else val
+        if val is None:
+            raise KeyError(
+                f"Required model config key '{key}' not found or null. "
+                f"Ensure the models table and DEFAULT_MODEL_CONFIG are complete."
+            )
+        return val
 
-    def pick_none_if_zero(key: str, default=None):
+    def pick_optional(key: str):
+        """Return a model config value, or None if missing/null."""
+        return cfg.get(key)
+
+    def pick_none_if_zero(key: str):
+        """Return None when the value is 0 (meaning 'no constraint'), else return the value."""
         val = cfg.get(key)
+        if val is None:
+            return None
         if val == 0 or val == 0.0 or val == "0":
             return None
-        return default if val is None else val
+        return val
 
     model_name = cfg.get('name') or 'Default'
 
@@ -489,170 +1129,58 @@ def main(
 
     # Economic parameters
     econ = EconomicParameters(
-        discount_rate=pick('discount_rate', 0.08),
-        inflation_rate=pick('inflation_rate', 0.02),
-        electricity_escalation=pick('electricity_escalation', 0.02),
-        crop_escalation=pick('crop_escalation', 0.00),
-        project_life=int(pick('project_life', 27)),
+        discount_rate=pick('discount_rate'),
+        inflation_rate=pick('inflation_rate'),
+        electricity_escalation=pick('electricity_escalation'),
+        crop_escalation=pick('crop_escalation'),
+        project_life=int(pick('project_life')),
+        developer_discount_rate=pick('developer_discount_rate'),
+        developer_tax_rate=pick('developer_tax_rate'),
     )
 
     # Base solar parameters (excluding capacity_factor which comes from PVWatts)
     base_solar_params = {
-        'land_intensity_acres_per_MW': pick('land_intensity_acres_per_MW', 5.5),
-        'degradation_rate': pick('degradation_rate', 0.005),
-        'installed_cost_per_MW': pick('installed_cost_per_MW', 1_610_000.0),
-        'site_prep_cost_per_acre': pick('site_prep_cost_per_acre', 36_800.0),
-        'grading_cost_per_acre': pick('grading_cost_per_acre', 8_286.0),
-        'retilling_cost_per_acre': pick('retilling_cost_per_acre', 950.0),
-        'interconnection_fraction': pick('interconnection_fraction', 0.30),
-        'bond_cost_per_acre': pick('bond_cost_per_acre', 10_000.0),
-        'vegetation_cost_per_acre': pick('vegetation_cost_per_acre', 225.0),
-        'insurance_cost_per_acre': pick('insurance_cost_per_acre', 100.0),
-        'oandm_cost_per_kw': pick('oandm_cost_per_kw', 11.0),
-        'replacement_cost_per_MW': pick('replacement_cost_per_MW', 100_000.0),
-        'replacement_year': int(pick('replacement_year', 14)),
-        'decommission_cost_per_kw': pick('decommission_cost_per_kw', 400.0),
-        'remediation_cost_per_acre': pick('remediation_cost_per_acre', 2_580.0),
-        'salvage_value_per_acre': pick('salvage_value_per_acre', 12_500.0),
-        'itc_rate': 0.50,
-        'electricity_price_0': 0.08,
-        'availability_factor': pick('availability_factor', 0.98),
-        'curtailment_factor': pick('curtailment_factor', 0.95),
-        'export_factor': pick('export_factor', 1.0),
+        'land_intensity_acres_per_MW': pick('land_intensity_acres_per_MW'),
+        'degradation_rate': pick('degradation_rate'),
+        'installed_cost_per_MW': pick('installed_cost_per_MW'),
+        'site_prep_cost_per_acre': pick('site_prep_cost_per_acre'),
+        'grading_cost_per_acre': pick('grading_cost_per_acre'),
+        'retilling_cost_per_acre': pick('retilling_cost_per_acre'),
+        'interconnection_fraction': pick('interconnection_fraction'),
+        'bond_cost_per_acre': pick('bond_cost_per_acre'),
+        'vegetation_cost_per_acre': pick('vegetation_cost_per_acre'),
+        'insurance_cost_per_acre': pick('insurance_cost_per_acre'),
+        'oandm_cost_per_kw': pick('oandm_cost_per_kw'),
+        'replacement_cost_per_MW': pick('replacement_cost_per_MW'),
+        'replacement_year': int(pick('replacement_year')),
+        'decommission_cost_per_kw': pick('decommission_cost_per_kw'),
+        'remediation_cost_per_acre': pick('remediation_cost_per_acre'),
+        'salvage_value_per_acre': pick('salvage_value_per_acre'),
+        'itc_rate': 0.30,  # placeholder — overridden per-scenario in evaluate_scenario()
+        'electricity_price_0': pick('electricity_price_0'),
+        'availability_factor': pick('availability_factor'),
+        'curtailment_factor': pick('curtailment_factor'),
+        'export_factor': pick('export_factor'),
+        'construction_interest_rate': pick('construction_interest_rate'),
+        # ── New parameters (12 improvements) ──
+        'oandm_escalation_rate': pick('oandm_escalation_rate'),
+        'opex_escalation_rate': pick('opex_escalation_rate'),
+        'property_tax_per_kw': pick('property_tax_per_kw'),
+        'property_tax_escalation': pick('property_tax_escalation'),
+        'ppa_price_kwh': pick('ppa_price_kwh'),
+        'ppa_years': int(pick('ppa_years')),
+        'merchant_discount': pick('merchant_discount'),
+        'debt_fraction': pick('debt_fraction'),
+        'debt_interest_rate': pick('debt_interest_rate'),
+        'debt_term_years': int(pick('debt_term_years')),
+        'soft_cost_fraction': pick('soft_cost_fraction'),
+        'dc_ac_ratio': pick('dc_ac_ratio'),
+        'working_capital_months': pick('working_capital_months'),
+        'curtailment_annual_increase': pick('curtailment_annual_increase'),
     }
 
     # All crop parameters
-    all_crops = [
-        CropParameters(
-            name="Corn (grain)",
-            yield_per_acre=178.0,  # bu/acre (USDA NASS 2025)
-            price_per_unit_0=4.16,  # $/bu (USDA NASS 2024)
-            unit="bushel",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Soybeans",
-            yield_per_acre=48.5,  # bu/acre (USDA NASS 2025)
-            price_per_unit_0=10.50,  # $/bu (USDA NASS 2024)
-            unit="bushel",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Wheat",
-            yield_per_acre=90.0,  # bu/acre (USDA NASS 2025)
-            price_per_unit_0=5.55,  # $/bu (USDA NASS 2024)
-            unit="bushel",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Dry beans",
-            yield_per_acre=20.22,  # cwt/acre (converted from database)
-            price_per_unit_0=40.50,  # $/cwt (USDA NASS 2024)
-            unit="cwt",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Sugar beets",
-            yield_per_acre=28.6,  # ton/acre (USDA NASS 2025)
-            price_per_unit_0=59.70,  # $/ton (USDA NASS 2023)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Potatoes",
-            yield_per_acre=435.0,  # cwt/acre (USDA NASS 2025)
-            price_per_unit_0=16.20,  # $/cwt (USDA NASS 2024)
-            unit="cwt",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Tart cherries",
-            yield_per_acre=5.058,  # ton/acre (converted from database)
-            price_per_unit_0=1706.00,  # $/ton (USDA NASS 2024, converted)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Apples",
-            yield_per_acre=14.16,  # ton/acre (converted from database)
-            price_per_unit_0=748.00,  # $/ton (USDA NASS 2024, converted)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Blueberries",
-            yield_per_acre=6474.0,  # lb/acre (converted from database)
-            price_per_unit_0=1.76,  # $/lb (USDA NASS 2024)
-            unit="lb",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Grapes",
-            yield_per_acre=4.047,  # ton/acre (converted from database)
-            price_per_unit_0=2400.00,  # $/ton (Michigan Wine Collaborative, mid-range)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Cucumbers",
-            yield_per_acre=10.12,  # ton/acre (converted from database)
-            price_per_unit_0=212.00,  # $/ton (USDA NASS 2024)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Tomatoes",
-            yield_per_acre=20.23,  # ton/acre (converted from database)
-            price_per_unit_0=116.00,  # $/ton (USDA NASS 2024)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Asparagus",
-            yield_per_acre=4856.0,  # lb/acre (converted from database)
-            price_per_unit_0=0.909,  # $/lb (USDA NASS 2024, converted)
-            unit="lb",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Carrots",
-            yield_per_acre=14.16,  # ton/acre (converted from database)
-            price_per_unit_0=195.00,  # $/ton (USDA NASS 2024)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Onions",
-            yield_per_acre=283.2,  # cwt/acre (converted from database)
-            price_per_unit_0=10.80,  # $/cwt (USDA NASS 2024, converted)
-            unit="cwt",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-        CropParameters(
-            name="Alfalfa hay",
-            yield_per_acre=3.1,  # ton/acre (USDA NASS 2025)
-            price_per_unit_0=173.00,  # $/ton (USDA NASS 2024)
-            unit="ton",
-            cost_per_acre=500.0,
-            escalation_rate=0.00,
-        ),
-    ]
-
+    # ── Build crop list from DB data (no hardcoded crop defaults) ──
     selected_crops: List[CropParameters] = []
 
     if crop_data:
@@ -678,144 +1206,91 @@ def main(
                 raise ValueError(f"Crop entry {idx} has invalid numeric field: {exc}") from exc
         if not selected_crops:
             raise ValueError("No crop data provided")
-        print(f"[Python] Using {len(selected_crops)} crop(s) from provided data: {[c.name for c in selected_crops]}")
+        print(f"[Python] Using {len(selected_crops)} crop(s) from DB: {[c.name for c in selected_crops]}")
     else:
-        # Select the specified crops from the predefined set; reject unknowns
-        crop_dict = {c.name: c for c in all_crops}
-        invalid_crops = []
+        raise ValueError(
+            "No crop data supplied. Crops must come from the database via --crop-data. "
+            "Ensure the crops table is populated."
+        )
 
-        for crop_name in crop_name_list:
-            if crop_name in crop_dict:
-                selected_crops.append(crop_dict[crop_name])
-            else:
-                invalid_crops.append(crop_name)
+    # ── Shared parameters (constant across incentive scenarios) ──
+    lease = LeaseParameters(
+        min_rate=pick_optional('lease_min_rate'),
+        max_rate=pick_optional('lease_max_rate'),
+        escalation_rate=pick('lease_escalation_rate'),
+    )
+    farmer = FarmerParameters(
+        pa116_credit_per_acre=pick('farmer_pa116_credit_per_acre'),
+    )
+    constraints = LandConstraints(
+        total_land=acres,
+        min_ag_fraction=pick('constraints_min_ag_fraction'),
+        max_prime_solar=pick_none_if_zero('constraints_max_prime_solar'),
+        zoning_max_solar=pick_none_if_zero('constraints_zoning_max_solar'),
+        setback_fraction=pick('constraints_setback_fraction'),
+        easement_acres=pick('constraints_easement_acres'),
+        wetland_exclusion_acres=pick('constraints_wetland_exclusion_acres'),
+        interconnect_capacity_mw=pick_none_if_zero('constraints_interconnect_capacity_mw'),
+    )
+    developer_retention_fraction = pick('developer_retention_fraction')
 
-        if invalid_crops:
-            raise ValueError(f"Unknown crops: {', '.join(invalid_crops)}. Available crops: {', '.join(crop_dict.keys())}")
+    # Create base SolarParameters (ITC handled per-scenario in evaluate_scenario)
+    solar = create_solar_parameters_from_pvwatts(pvwatts_response, base_solar_params)
 
-        if not selected_crops:
-            raise ValueError("No valid crops specified")
+    # ── Rebuild incentive catalog from DB definitions (if provided) ──
+    global INCENTIVE_BY_ID, MUTUAL_EXCLUSION_GROUPS
+    incentive_defs = cfg.get('incentive_definitions')
+    if incentive_defs:
+        INCENTIVE_BY_ID, MUTUAL_EXCLUSION_GROUPS = _build_catalog_from_defs(incentive_defs)
+        print(f"[Python] Loaded {len(INCENTIVE_BY_ID)} incentives from DB "
+              f"({len(MUTUAL_EXCLUSION_GROUPS)} mutual-exclusion groups)")
+    else:
+        raise ValueError("No incentive_definitions supplied in model config. "
+                         "Ensure the incentives table is populated.")
 
-        print(f"[Python] Selected {len(selected_crops)} crop(s) for analysis: {[c.name for c in selected_crops]}")
+    # ── Apply user-supplied incentive parameter overrides ──
+    incentive_params = cfg.get('incentive_params', {})
+    if incentive_params:
+        bf_amount = incentive_params.get('brownfield_egle_amount')
+        if bf_amount is not None and 'brownfield_egle' in INCENTIVE_BY_ID:
+            INCENTIVE_BY_ID['brownfield_egle'].capex_flat_reduction = float(bf_amount)
+            print(f"[Python] Brownfield EGLE grant overridden to ${float(bf_amount):,.0f}")
 
+    # ── Generate & evaluate incentive scenarios ──
+    eligible_ids = cfg.get('eligible_incentives', None)
+    scenarios = generate_scenarios(eligible_ids)
+    print(f"[Python] Generated {len(scenarios)} incentive scenario combinations")
+
+    all_evals = []
+    for stack in scenarios:
+        crop_results = evaluate_scenario(
+            stack, solar, econ, selected_crops, lease, farmer, constraints,
+            developer_retention_fraction,
+        )
+        if crop_results:
+            all_evals.append(crop_results)
+
+    print(f"[Python] {len(all_evals)} scenarios produced valid results")
+
+    # ── Rank by farmer NPV and select top 3 per crop ──
     results = {}
-
-    # Run for each selected crop
     for crop in selected_crops:
-        print(f"\n[Python] === ANALYZING CROP: {crop.name} ===")
-        crops = [crop]  # Analysis expects a list, but we run one at a time
+        ranked = []
+        for cr in all_evals:
+            if crop.name in cr:
+                ranked.append(cr[crop.name])
+        ranked.sort(key=lambda r: r['objective_farmer_NPV'], reverse=True)
+
+        top = ranked[:3]
         results[crop.name] = {}
+        for i, sc in enumerate(top, 1):
+            results[crop.name][f"#{i}"] = sc
 
-        # Run three ITC scenarios
-        itc_scenarios = [0.30, 0.40, 0.50]  # 30%, 40%, 50%
-
-        for itc_rate in itc_scenarios:
-            # Create solar parameters for this ITC scenario
-            scenario_solar_params = base_solar_params.copy()
-            scenario_solar_params['itc_rate'] = itc_rate
-            solar = create_solar_parameters_from_pvwatts(pvwatts_response, scenario_solar_params)
-
-            lease = LeaseParameters(
-                min_rate=pick('lease_min_rate', None),
-                max_rate=pick('lease_max_rate', None),
-                escalation_rate=pick('lease_escalation_rate', 0.0),
-            )
-
-            farmer = FarmerParameters(
-                pa116_credit_per_acre=pick('farmer_pa116_credit_per_acre', 0.0),
-            )
-
-            developer_retention_fraction = pick('developer_retention_fraction', 0.12)
-
-            # Stage 1: compute lease rate
-            L_solar = compute_lease_rate(solar, econ, lease, developer_retention_fraction)
-
-            # Stage 2: optimize land allocation
-            constraints = LandConstraints(
-                total_land=acres,
-                min_ag_fraction=pick('constraints_min_ag_fraction', 0.51),
-                max_prime_solar=pick_none_if_zero('constraints_max_prime_solar', None),
-                zoning_max_solar=pick_none_if_zero('constraints_zoning_max_solar', None),
-                setback_fraction=pick('constraints_setback_fraction', 0.10),
-                easement_acres=pick('constraints_easement_acres', 0.0),
-                wetland_exclusion_acres=pick('constraints_wetland_exclusion_acres', 0.0),
-                interconnect_capacity_mw=pick_none_if_zero('constraints_interconnect_capacity_mw', None),
-            )
-
-            result = optimize_land_allocation(
-                solar=solar,
-                econ=econ,
-                crops=crops,
-                lease=lease,
-                farmer=farmer,
-                constraints=constraints,
-                L_solar=L_solar,
-            )
-
-            results[crop.name][f"{int(itc_rate*100)}%"] = result
-
-            if not output_json:
-                # Print results for this scenario
-                print("Economic parameters:")
-                for k, v in asdict(econ).items():
-                    print(f"  {k}: {v}")
-                print()
-                print("Derived discount factors (first 5):", econ.discount_factors[:5])
-                print()
-                print("Solar parameters:")
-                for k, v in asdict(solar).items():
-                    print(f"  {k}: {v}")
-                print()
-                print(f"Calculated CAPEX per acre (before ITC): ${solar.capex_per_acre():,.2f}")
-                print(f"  - Construction cost: ${(solar.installed_cost_per_MW / solar.land_intensity_acres_per_MW):,.2f}")
-                print(f"  - Site preparation: ${solar.site_prep_cost_per_acre:,.2f}")
-                print(f"  - Grading: ${solar.grading_cost_per_acre:,.2f}")
-                print(f"  - Retilling: ${solar.retilling_cost_per_acre:,.2f}")
-                print(f"  - Interconnection upgrades: ${(solar.interconnection_fraction * solar.installed_cost_per_MW / solar.land_intensity_acres_per_MW):,.2f}")
-                print(f"  - Decommissioning bond: ${solar.bond_cost_per_acre:,.2f}")
-                print(f"ITC benefit per acre (applied in year 2): ${solar.capex_per_acre() * solar.itc_rate:,.2f}")
-                print(f"Calculated OPEX per acre (excluding lease): ${solar.opex_per_acre():,.2f} per year")
-                print(f"Replacement cost per acre at year {solar.replacement_year}: ${solar.replacement_cost_per_acre():,.2f}")
-                print(f"End-of-life net cost per acre (decom + remediation - salvage): ${solar.decommission_cost_per_acre():,.2f}")
-                print()
-
-                print("Crop parameters:")
-                for crop in crops:
-                    for k, v in asdict(crop).items():
-                        print(f"  {crop.name} - {k}: {v}")
-                print()
-                print(f"Derived solar lease rate (L_solar): ${L_solar:,.2f} per acre-year")
-                print()
-                print(f"Developer retention constraint ({developer_retention_fraction:.2%} minimum):")
-                pv_net_no_lease = result['pv_solar_net_per_acre_no_lease']
-                developer_retained_pv = developer_retention_fraction * pv_net_no_lease
-                developer_after_lease_pv = pv_net_no_lease - result['pv_lease_per_acre']
-                print(f"  Pre-lease solar NPV per acre: ${pv_net_no_lease:,.2f}")
-                print(f"  Developer minimum retained NPV per acre ({developer_retention_fraction:.2%}): ${developer_retained_pv:,.2f}")
-                print(f"  Developer NPV after lease per acre: ${developer_after_lease_pv:,.2f}")
-                print(f"  Lease PV to farmer per acre: ${result['pv_lease_per_acre']:,.2f}")
-                print()
-                print("Stage 2 optimization results (farmer objective):")
-                print(f"  Usable land for solar (after setbacks/exclusions): {result['usable_land']:.2f} acres")
-                print(f"  Available land for crops (no setbacks): {result['crop_land']:.2f} acres")
-                print(f"  Max solar allowed by caps: {result['max_solar']:.2f} acres")
-                print(f"  Solar acres (A_s): {result['A_s']:.2f} acres")
-                for name, acres in result["A_c_by_crop"].items():
-                    print(f"  Crop acres ({name}): {acres:.2f} acres")
-                print()
-                print("Per-acre present value contributions:")
-                print(f"  PV net solar (per acre, no lease): ${result['pv_solar_net_per_acre_no_lease']:,.2f}")
-                print(f"  PV net solar (per acre, after lease): ${result['pv_solar_net_per_acre_after_lease']:,.2f}")
-                print(f"  PV lease to farmer (per acre): ${result['pv_lease_per_acre']:,.2f}")
-                for name, pv in result["pv_crop_per_acre"].items():
-                    print(f"  PV net crop (per acre, {name}): ${pv:,.2f}")
-                print()
-                print(f"Total farmer NPV: ${result['objective_farmer_NPV']:,.2f}")
-
-
-    if output_json:
-        import json
-        print(json.dumps(results))
+        if top:
+            print(f"[Python] {crop.name}: best NPV=${top[0]['objective_farmer_NPV']:,.0f} "
+                  f"({top[0].get('scenario_name', '?')}), {len(ranked)} evaluated")
+        else:
+            print(f"[Python] {crop.name}: no feasible scenarios")
 
     return results
 
@@ -826,13 +1301,20 @@ if __name__ == "__main__":
     import json
 
     parser = argparse.ArgumentParser(description="Run agrivoltaics optimizer with PVWatts data")
-    parser.add_argument('--acres', type=float, required=True, help='Total acres available')
+    parser.add_argument('--acres', type=float, default=None, help='Total acres available')
     parser.add_argument('--crops', type=str, help='Comma-separated crop names')
     parser.add_argument('--crop-data', dest='crop_data', type=str, help='JSON array of crop parameter objects')
-    parser.add_argument('--data', type=str, required=True, help='PVWatts JSON payload (string)')
+    parser.add_argument('--data', type=str, default=None, help='PVWatts JSON payload (string)')
     parser.add_argument('--json', action='store_true', help='Output JSON only')
     parser.add_argument('--model-config', dest='model_config', type=str, help='JSON payload of model parameter overrides')
     args = parser.parse_args()
+
+    if args.acres is None:
+        print("[Python] ERROR: --acres is required")
+        sys.exit(1)
+    if args.data is None:
+        print("[Python] ERROR: --data is required")
+        sys.exit(1)
 
     try:
         pvwatts_data = json.loads(args.data)

@@ -642,6 +642,14 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [selectedModelId, setSelectedModelId] = useState(null);
   const [selectedModel, setSelectedModel] = useState(null);
 
+  // Incentive picker state
+  const [incentiveCatalog, setIncentiveCatalog] = useState([]);
+  const [incentivesLoading, setIncentivesLoading] = useState(false);
+  const [selectedIncentiveIds, setSelectedIncentiveIds] = useState([]);
+  const [incentiveDropdownOpen, setIncentiveDropdownOpen] = useState(false);
+  const [incentivesError, setIncentivesError] = useState(null);
+  const [incentiveParams, setIncentiveParams] = useState({ brownfield_egle_amount: 500000 });
+
   // Other form fields (restored)
   const [farmType, setFarmType] = useState('');
   const [acreage, setAcreage] = useState('');
@@ -1031,6 +1039,35 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  // Fetch incentive catalog from backend
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIncentivesLoading(true);
+      try {
+        const resp = await fetch(buildApiUrl('/linear-optimization/incentives'));
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!cancelled && Array.isArray(data?.incentives)) {
+          setIncentiveCatalog(data.incentives);
+          // Select all by default
+          setSelectedIncentiveIds(data.incentives.map(i => i.id));
+        }
+      } catch (err) {
+        if (!cancelled) setIncentivesError(err?.message || 'Could not load incentives');
+      } finally {
+        if (!cancelled) setIncentivesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggleIncentive = (id) => {
+    setSelectedIncentiveIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
 
   // Keep selected model aligned with fetched list without overwriting user choice.
   useEffect(() => {
@@ -1624,7 +1661,10 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
             losses: parsedLosses,
           },
           modelId: selectedModel?.id || null,
-          modelFlags: {},
+          modelFlags: {
+            ...(selectedIncentiveIds.length > 0 ? { eligible_incentives: selectedIncentiveIds } : {}),
+            ...(selectedIncentiveIds.includes('brownfield_egle') ? { incentive_params: { brownfield_egle_amount: incentiveParams.brownfield_egle_amount } } : {}),
+          },
         };
 
         const response = await fetch(buildApiUrl('/linear-optimization'), {
@@ -2085,6 +2125,108 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 keyboardType="numeric"
               />
 
+            </View>
+          )}
+
+          {/* ── Incentive / Credit Picker ── */}
+          {(siteIncludes === 'farming' || siteIncludes === 'neither') && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Credits & Incentives</Text>
+              <Text style={styles.sectionSubtitle}>Select the programs to include in the optimization</Text>
+
+              {incentivesLoading && (
+                <Text style={styles.sectionSubtitle}>Loading programs…</Text>
+              )}
+              {!incentivesLoading && incentivesError && (
+                <Text style={[styles.sectionSubtitle, { color: '#c0392b' }]}>
+                  Could not load incentive catalog — {incentivesError}
+                </Text>
+              )}
+              {!incentivesLoading && !incentivesError && incentiveCatalog.length === 0 && (
+                <Text style={styles.sectionSubtitle}>No programs available.</Text>
+              )}
+
+              {!incentivesLoading && incentiveCatalog.length > 0 && (
+              <>
+              <Pressable
+                style={styles.dropdownButton}
+                onPress={() => setIncentiveDropdownOpen(!incentiveDropdownOpen)}
+              >
+                <Text style={styles.dropdownButtonText} numberOfLines={1}>
+                  {selectedIncentiveIds.length === 0
+                    ? 'None selected'
+                    : selectedIncentiveIds.length === incentiveCatalog.length
+                    ? 'All programs selected'
+                    : `${selectedIncentiveIds.length} of ${incentiveCatalog.length} selected`}
+                </Text>
+                <Text style={styles.dropdownArrow}>{incentiveDropdownOpen ? '▲' : '▼'}</Text>
+              </Pressable>
+
+              {incentiveDropdownOpen && (
+                <View style={styles.dropdownList}>
+                  {/* Select All / Clear All */}
+                  <View style={styles.incentiveActions}>
+                    <Pressable
+                      style={styles.incentiveActionBtn}
+                      onPress={() => setSelectedIncentiveIds(incentiveCatalog.map(i => i.id))}
+                    >
+                      <Text style={styles.incentiveActionText}>Select All</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.incentiveActionBtn}
+                      onPress={() => setSelectedIncentiveIds([])}
+                    >
+                      <Text style={styles.incentiveActionText}>Clear All</Text>
+                    </Pressable>
+                  </View>
+                  <ScrollView nestedScrollEnabled={true} style={styles.incentiveScroll}>
+                    {incentiveCatalog.map((inc) => {
+                      const selected = selectedIncentiveIds.includes(inc.id);
+                      return (
+                        <React.Fragment key={inc.id}>
+                        <Pressable
+                          style={[styles.incentiveRow, selected && styles.incentiveRowSelected]}
+                          onPress={() => toggleIncentive(inc.id)}
+                        >
+                          <View style={styles.checkbox}>
+                            {selected && <Text style={styles.checkmark}>✓</Text>}
+                          </View>
+                          <View style={styles.incentiveInfo}>
+                            <Text style={styles.incentiveCat}>{inc.category}</Text>
+                            <Text style={styles.incentiveLabel}>{inc.name}</Text>
+                            <Text style={styles.incentiveDescText}>{inc.description}</Text>
+                          </View>
+                        </Pressable>
+                        {/* Inline grant amount picker for brownfield */}
+                        {inc.id === 'brownfield_egle' && selected && (
+                          <View style={{ paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#1a2a1a', borderBottomWidth: 1, borderColor: '#2d5a27' }}>
+                            <Text style={{ color: '#a8d5a2', fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Grant Amount</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                              {[100000, 250000, 500000, 750000, 1000000].map(amt => (
+                                <Pressable
+                                  key={amt}
+                                  onPress={() => setIncentiveParams(p => ({ ...p, brownfield_egle_amount: amt }))}
+                                  style={{
+                                    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5,
+                                    backgroundColor: incentiveParams.brownfield_egle_amount === amt ? '#4CAF50' : '#2a3a2a',
+                                    borderWidth: 1, borderColor: incentiveParams.brownfield_egle_amount === amt ? '#66BB6A' : '#3a4a3a',
+                                  }}>
+                                  <Text style={{ color: incentiveParams.brownfield_egle_amount === amt ? '#fff' : '#8a9a8a', fontSize: 12, fontWeight: '600' }}>
+                                    ${(amt / 1000).toFixed(0)}K
+                                  </Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+              </>
+              )}
             </View>
           )}
 
@@ -4198,6 +4340,79 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 4,
+  },
+  // ── Incentive picker styles ──
+  section: {
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    marginBottom: 10,
+  },
+  incentiveActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  incentiveActionBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.buttonBg,
+    borderWidth: 1,
+    borderColor: COLORS.buttonBorder,
+  },
+  incentiveActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.buttonText,
+  },
+  incentiveScroll: {
+    maxHeight: 280,
+  },
+  incentiveRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  incentiveRowSelected: {
+    backgroundColor: 'rgba(159, 232, 112, 0.08)',
+  },
+  incentiveInfo: {
+    flex: 1,
+  },
+  incentiveCat: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: COLORS.accent || '#B24636',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  incentiveLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: 1,
+  },
+  incentiveDescText: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    marginTop: 2,
+    lineHeight: 15,
   },
 });
 
