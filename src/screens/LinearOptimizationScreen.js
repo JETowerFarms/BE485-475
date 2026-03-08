@@ -26,6 +26,9 @@ const COLORS = {
   infoBg: '#FFFDF8',
   border: '#8B8680',           // warm gray – shared
   borderLight: '#D4D0C4',
+  // Back button (shared across all screens)
+  backBtnBg: '#5A554E',
+  backBtnBorder: '#3D3A36',
 };
 
 const LinearOptimizationScreen = ({ farms, onBack }) => {
@@ -365,19 +368,19 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.headerBg} />
+
+      {/* Back Button */}
+      <Pressable
+        style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+        onPress={onBack}
+      >
+        <Text style={styles.backButtonText}>←</Text>
+      </Pressable>
 
       {/* Header */}
       <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-          onPress={onBack}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </Pressable>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Agrivoltaics Analysis Results</Text>
-        </View>
+        <Text style={styles.headerTitle}>Agrivoltaics Analysis Results</Text>
       </View>
 
       {/* Graph Display Area */}
@@ -451,29 +454,28 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.headerBg,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingTop: Platform.OS === 'ios' ? 50 : 45,
-    paddingBottom: 15,
-    paddingHorizontal: 20,
+    paddingBottom: 10,
+    paddingHorizontal: 60,
+    alignItems: 'center',
     backgroundColor: COLORS.headerBg,
     borderBottomWidth: 3,
     borderBottomColor: COLORS.headerBorder,
   },
   backButton: {
     position: 'absolute',
+    top: 70,
     left: 20,
-    top: Platform.OS === 'ios' ? 50 : 45,
     zIndex: 100,
     width: 36,
     height: 36,
     borderRadius: 4,
-    backgroundColor: COLORS.headerText,
+    backgroundColor: COLORS.backBtnBg,
     borderWidth: 2,
-    borderColor: COLORS.headerBorder,
+    borderColor: COLORS.backBtnBorder,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -489,7 +491,7 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 2 }],
   },
   backButtonText: {
-    color: COLORS.accentRed,
+    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
@@ -497,12 +499,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
     lineHeight: 20,
   },
-  headerContent: {
-    flex: 1,
-    alignItems: 'center',
-  },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.headerText,
     textAlign: 'center',
