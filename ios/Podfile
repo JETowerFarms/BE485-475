@@ -1,0 +1,93 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'optimizationtool' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # Download and install the official Hermes dSYMs from Maven so the archive
+    # includes the hermesvm.framework dSYM (required by App Store Connect).
+    hermes_version_props = Hash[
+      *File.read(File.join(config[:reactNativePath], 'sdks', 'hermes-engine', 'version.properties'))
+           .split(/[=\n]+/)
+    ]
+    hermes_version = hermes_version_props['HERMES_VERSION_NAME']
+    dsym_url = "https://repo1.maven.org/maven2/com/facebook/hermes/hermes-ios/#{hermes_version}/hermes-ios-#{hermes_version}-hermes-framework-dSYM-release.tar.gz"
+    dsym_tar = File.join(installer.sandbox.root, 'hermes-engine-artifacts', "hermes-dsym-#{hermes_version}-release.tar.gz")
+
+    unless File.exist?(dsym_tar)
+      Pod::UI.puts "[Hermes dSYM] Downloading release dSYMs from Maven…".yellow
+      FileUtils.mkdir_p(File.dirname(dsym_tar))
+      system("curl", "-L", dsym_url, "-o", dsym_tar)
+    end
+
+    if File.exist?(dsym_tar)
+      xcfw_dir = File.join(installer.sandbox.root, 'hermes-engine', 'destroot', 'Library', 'Frameworks', 'universal', 'hermesvm.xcframework')
+      # Extract iphoneos dSYM next to the ios-arm64 framework slice.
+      # NOTE: The tarball entries have a leading "./" prefix so BSD tar on macOS
+      # won't match them when you specify member paths without "./". Extract the
+      # whole tarball into a temp dir and then copy what we need — this is
+      # reliable across all tar implementations.
+      iphoneos_dsym_dest = File.join(xcfw_dir, 'ios-arm64', 'hermesvm.framework.dSYM')
+      unless File.exist?(iphoneos_dsym_dest)
+        Pod::UI.puts "[Hermes dSYM] Installing iphoneos dSYM…".yellow
+        require 'tmpdir'
+        Dir.mktmpdir('hermes-dsym') do |tmpdir|
+          if system("tar", "xzf", dsym_tar, "-C", tmpdir)
+            src = File.join(tmpdir, 'iphoneos', 'hermesvm.framework.dSYM')
+            FileUtils.cp_r(src, iphoneos_dsym_dest) if File.exist?(src)
+          end
+        end
+      end
+      Pod::UI.puts "[Hermes dSYM] dSYM ready at #{iphoneos_dsym_dest}".green
+    end
+
+    # Add a script phase to the main target that copies the Hermes dSYM into
+    # the archive's dSYMs folder so Xcode includes it during export/upload.
+    main_target = installer.pods_project.targets.find { |t| t.name == 'hermes-engine' }
+    if main_target
+      phase_name = '[Hermes] Copy dSYM to archive'
+      unless main_target.shell_script_build_phases.any? { |p| p.name == phase_name }
+        phase = main_target.new_shell_script_build_phase(phase_name)
+        phase.shell_script = <<~SH
+          if [ "${ACTION}" = "install" ] || [ -n "${ARCHIVE_PRODUCTS_PATH}" ]; then
+            DSYM_SOURCE="${PODS_ROOT}/hermes-engine/destroot/Library/Frameworks/universal/hermesvm.xcframework/ios-arm64/hermesvm.framework.dSYM"
+            if [ -d "${DSYM_SOURCE}" ]; then
+              DSYM_DEST="${DWARF_DSYM_FOLDER_PATH}/hermesvm.framework.dSYM"
+              echo "Copying Hermes dSYM to ${DSYM_DEST}"
+              rsync -a "${DSYM_SOURCE}/" "${DSYM_DEST}/"
+            fi
+          fi
+        SH
+      end
+    end
+
+    installer.pods_project.save
+  end
+end
