@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { buildApiUrl } from '../config/apiConfig';
@@ -24,6 +25,9 @@ const COLORS = {
   accent: '#7A9A7A',
   danger: '#B24636',
   success: '#2E7D32',
+  // Back button (shared across all screens)
+  backBtnBg: '#5A554E',
+  backBtnBorder: '#3D3A36',
 };
 
 const EDITABLE_FIELDS = [
@@ -282,13 +286,18 @@ const ModelEditorScreen = ({ onBack }) => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.headerBg} />
+
+      {/* Back Button */}
+      <Pressable
+        onPress={onBack}
+        style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+      >
+        <Text style={styles.backButtonText}>←</Text>
+      </Pressable>
+
+      {/* Header */}
       <View style={styles.header}>
-        <Pressable
-          onPress={onBack}
-          style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </Pressable>
         <Text style={styles.headerTitle}>Model Editor</Text>
       </View>
 
@@ -437,25 +446,28 @@ const ModelEditorScreen = ({ onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.headerBg,
   },
   header: {
-    flexDirection: 'row',
+    paddingTop: Platform.OS === 'ios' ? 50 : 45,
+    paddingBottom: 10,
+    paddingHorizontal: 60,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
     backgroundColor: COLORS.headerBg,
-    borderBottomWidth: 1,
+    borderBottomWidth: 3,
     borderBottomColor: COLORS.border,
   },
   backButton: {
-    marginRight: 12,
+    position: 'absolute',
+    top: 70,
+    left: 20,
+    zIndex: 100,
     width: 36,
     height: 36,
     borderRadius: 4,
-    backgroundColor: COLORS.headerText,
+    backgroundColor: COLORS.backBtnBg,
     borderWidth: 2,
-    borderColor: COLORS.border,
+    borderColor: COLORS.backBtnBorder,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -471,7 +483,7 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 2 }],
   },
   backButtonText: {
-    color: COLORS.accent,
+    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
@@ -481,11 +493,13 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: 'bold',
     color: COLORS.headerText,
+    textAlign: 'center',
   },
   body: {
     flex: 1,
+    backgroundColor: COLORS.background,
   },
   bodyContent: {
     padding: 16,

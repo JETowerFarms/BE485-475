@@ -73,6 +73,9 @@ const COLORS = {
   headerText: '#2C2C2C',
   headerBorder: '#9BB09B',
   accent: '#7A9A7A',
+  // Back button (shared across all screens)
+  backBtnBg: '#5A554E',
+  backBtnBorder: '#3D3A36',
   // Complementary warm button
   nextButtonBg: '#F4A460',
   nextButtonBorder: '#E8946A',
@@ -642,6 +645,14 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [selectedModelId, setSelectedModelId] = useState(null);
   const [selectedModel, setSelectedModel] = useState(null);
 
+  // Incentive picker state
+  const [incentiveCatalog, setIncentiveCatalog] = useState([]);
+  const [incentivesLoading, setIncentivesLoading] = useState(false);
+  const [selectedIncentiveIds, setSelectedIncentiveIds] = useState([]);
+  const [incentiveDropdownOpen, setIncentiveDropdownOpen] = useState(false);
+  const [incentivesError, setIncentivesError] = useState(null);
+  const [incentiveParams, setIncentiveParams] = useState({ brownfield_egle_amount: 500000 });
+
   // Other form fields (restored)
   const [farmType, setFarmType] = useState('');
   const [acreage, setAcreage] = useState('');
@@ -650,8 +661,10 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [irrigationType, setIrrigationType] = useState('');
   const [notes, setNotes] = useState('');
 
-  // PVWatts / optimization inputs per-farm (all required, no defaults)
-  const emptyPvInputs = { kwPerAcre: '', tilt: '', azimuth: '', arrayType: '', moduleType: '', losses: '' };
+  // PVWatts / optimization inputs per-farm — Michigan-appropriate defaults
+  // Tilt 35°: optimal for ~42°N latitude (MI); Azimuth 180°: due south;
+  // Losses 16%: NREL base 14% + ~2% Michigan snow/soiling; kW/acre 200: agrivoltaic row spacing standard
+  const emptyPvInputs = { kwPerAcre: '200', tilt: '35', azimuth: '180', arrayType: '0', moduleType: '0', losses: '16' };
   const [pvInputsByFarmId, setPvInputsByFarmId] = useState({});
   const [pvDraftByFarmId, setPvDraftByFarmId] = useState({});
   const [pvFarmId, setPvFarmId] = useState(null);
@@ -662,7 +675,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   const [submitError, setSubmitError] = useState('');
   const [submitLoading, setSubmitLoading] = useState(false);
 
-  const isFormValid = selectedFarmIds.length > 0 && (siteIncludes === 'farming' || siteIncludes === 'neither');
+  const isFormValid = selectedFarmIds.length > 0 && siteIncludes === 'farming';
 
   const toggleFarmSelection = (farmId) => {
     setSelectedFarmIds(prev => 
@@ -1031,6 +1044,35 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  // Fetch incentive catalog from backend
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIncentivesLoading(true);
+      try {
+        const resp = await fetch(buildApiUrl('/linear-optimization/incentives'));
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!cancelled && Array.isArray(data?.incentives)) {
+          setIncentiveCatalog(data.incentives);
+          // Select all by default
+          setSelectedIncentiveIds(data.incentives.map(i => i.id));
+        }
+      } catch (err) {
+        if (!cancelled) setIncentivesError(err?.message || 'Could not load incentives');
+      } finally {
+        if (!cancelled) setIncentivesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggleIncentive = (id) => {
+    setSelectedIncentiveIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
 
   // Keep selected model aligned with fetched list without overwriting user choice.
   useEffect(() => {
@@ -1539,8 +1581,8 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       return;
     }
 
-    if (siteIncludes !== 'farming' && siteIncludes !== 'neither') {
-      setSubmitError('Select "Farming" or "Neither" to provide PV system inputs.');
+    if (siteIncludes !== 'farming') {
+      setSubmitError('Select "Farming" to provide PV system inputs.');
       return;
     }
 
@@ -1624,7 +1666,10 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
             losses: parsedLosses,
           },
           modelId: selectedModel?.id || null,
-          modelFlags: {},
+          modelFlags: {
+            ...(selectedIncentiveIds.length > 0 ? { eligible_incentives: selectedIncentiveIds } : {}),
+            ...(selectedIncentiveIds.includes('brownfield_egle') ? { incentive_params: { brownfield_egle_amount: incentiveParams.brownfield_egle_amount } } : {}),
+          },
         };
 
         const response = await fetch(buildApiUrl('/linear-optimization'), {
@@ -1664,7 +1709,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.headerBg} />
       
       {/* Back Button */}
       <Pressable
@@ -1684,7 +1729,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
 
       <KeyboardAvoidingView 
         style={styles.formContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
       >
         <ScrollView 
           style={styles.scrollView}
@@ -1724,7 +1769,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           </Pressable>
 
           {/* Select Farms */}
-          <View style={styles.inputGroup}>
+          <View style={[styles.selectorCard, { marginTop: 16 }]}>
             <Text style={styles.label}>Select Farm(s) *</Text>
             <Pressable 
               style={styles.dropdownButton}
@@ -1736,7 +1781,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                   : `${selectedFarmIds.length} farm${selectedFarmIds.length > 1 ? 's' : ''} selected`
                 }
               </Text>
-              <Text style={styles.dropdownArrow}>{farmDropdownOpen ? '▲' : '▼'}</Text>
+              <Text style={styles.dropdownArrow}>{farmDropdownOpen ? '^' : 'v'}</Text>
             </Pressable>
             {farmDropdownOpen && (
               <ScrollView style={styles.dropdownList} nestedScrollEnabled={true}>
@@ -1813,6 +1858,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Select Rotation</Text>
 
+                <View style={styles.selectorCard}>
                 <Text style={styles.subLabel}>Choose farm</Text>
                 <Pressable
                   style={[styles.dropdownButton, selectedFarmIds.length === 0 && styles.dropdownButtonDisabled]}
@@ -1824,7 +1870,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                   <Text style={styles.dropdownButtonText}>
                     {rotationFarmId ? getFarmLabel(rotationFarmId) : 'Select a farm...'}
                   </Text>
-                  <Text style={styles.dropdownArrow}>{rotationFarmDropdownOpen ? '▲' : '▼'}</Text>
+                  <Text style={styles.dropdownArrow}>{rotationFarmDropdownOpen ? '^' : 'v'}</Text>
                 </Pressable>
 
                 {rotationFarmDropdownOpen && (
@@ -1848,8 +1894,10 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                     ))}
                   </ScrollView>
                 )}
+                </View>
 
-                <Text style={[styles.subLabel, { marginTop: 12 }]}>Rotation crops (optional)</Text>
+                <View style={styles.selectorCard}>
+                <Text style={styles.subLabel}>Rotation crops (optional)</Text>
                 <Pressable
                   style={[styles.dropdownButton, !rotationFarmId && styles.dropdownButtonDisabled]}
                   onPress={() => {
@@ -1864,7 +1912,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                         ? 'No rotation'
                         : `${rotationDraftCropIds.length} crop${rotationDraftCropIds.length > 1 ? 's' : ''} selected`}
                   </Text>
-                  <Text style={styles.dropdownArrow}>{rotationDropdownOpen ? '▲' : '▼'}</Text>
+                  <Text style={styles.dropdownArrow}>{rotationDropdownOpen ? '^' : 'v'}</Text>
                 </Pressable>
 
                 {rotationDropdownOpen && (
@@ -1914,6 +1962,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                     )}
                   </View>
                 )}
+                </View>
 
                 <Pressable
                   style={styles.rotationSaveButton}
@@ -1925,16 +1974,17 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
             </>
           )}
 
-          {siteIncludes === 'grazing' && (
+          {(siteIncludes === 'grazing' || siteIncludes === 'neither') && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>future direction</Text>
             </View>
           )}
 
-          {(siteIncludes === 'farming' || siteIncludes === 'neither') && (
+          {siteIncludes === 'farming' && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>PV System Inputs (per farm)</Text>
 
+              <View style={styles.selectorCard}>
               <Text style={styles.subLabel}>Choose farm</Text>
               <Pressable
                 style={[styles.dropdownButton, selectedFarmIds.length === 0 && styles.dropdownButtonDisabled]}
@@ -1946,7 +1996,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 <Text style={styles.dropdownButtonText}>
                   {pvFarmId ? getFarmLabel(pvFarmId) : 'Select a farm...'}
                 </Text>
-                <Text style={styles.dropdownArrow}>{pvFarmDropdownOpen ? '▲' : '▼'}</Text>
+                <Text style={styles.dropdownArrow}>{pvFarmDropdownOpen ? '^' : 'v'}</Text>
               </Pressable>
 
               {pvFarmDropdownOpen && (
@@ -1970,13 +2020,14 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                   ))}
                 </ScrollView>
               )}
+              </View>
 
               <Text style={styles.subLabel}>kW per acre</Text>
               <TextInput
                 style={styles.input}
                 value={pvDraftInputs.kwPerAcre}
                 onChangeText={(text) => setPvDraftField('kwPerAcre', text)}
-                placeholder="e.g., 200"
+                placeholder="e.g., 200 (agrivoltaic)"
                 placeholderTextColor={COLORS.placeholder}
                 keyboardType="numeric"
               />
@@ -1986,7 +2037,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 style={styles.input}
                 value={pvDraftInputs.tilt}
                 onChangeText={(text) => setPvDraftField('tilt', text)}
-                placeholder="0 - 90"
+                placeholder="e.g., 35 (optimal for Michigan ~42°N)"
                 placeholderTextColor={COLORS.placeholder}
                 keyboardType="numeric"
               />
@@ -1996,11 +2047,12 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                 style={styles.input}
                 value={pvDraftInputs.azimuth}
                 onChangeText={(text) => setPvDraftField('azimuth', text)}
-                placeholder="0 - 359"
+                placeholder="e.g., 180 (due south)"
                 placeholderTextColor={COLORS.placeholder}
                 keyboardType="numeric"
               />
 
+              <View style={[styles.selectorCard, { marginTop: 16 }]}>
               <Text style={styles.subLabel}>Array Type</Text>
               <Pressable
                 style={[styles.dropdownButton, !pvFarmId && styles.dropdownButtonDisabled]}
@@ -2014,7 +2066,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                     ? arrayTypeOptions.find((o) => o.value === pvDraftInputs.arrayType)?.label || pvDraftInputs.arrayType
                     : 'Select array type'}
                 </Text>
-                <Text style={styles.dropdownArrow}>{arrayTypeDropdownOpen ? '▲' : '▼'}</Text>
+                <Text style={styles.dropdownArrow}>{arrayTypeDropdownOpen ? '^' : 'v'}</Text>
               </Pressable>
               {arrayTypeDropdownOpen && (
                 <View style={styles.dropdownList}>
@@ -2037,7 +2089,9 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                   </ScrollView>
                 </View>
               )}
+              </View>
 
+              <View style={styles.selectorCard}>
               <Text style={styles.subLabel}>Module Type</Text>
               <Pressable
                 style={[styles.dropdownButton, !pvFarmId && styles.dropdownButtonDisabled]}
@@ -2051,7 +2105,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                     ? moduleTypeOptions.find((o) => o.value === pvDraftInputs.moduleType)?.label || pvDraftInputs.moduleType
                     : 'Select module type'}
                 </Text>
-                <Text style={styles.dropdownArrow}>{moduleTypeDropdownOpen ? '▲' : '▼'}</Text>
+                <Text style={styles.dropdownArrow}>{moduleTypeDropdownOpen ? '^' : 'v'}</Text>
               </Pressable>
               {moduleTypeDropdownOpen && (
                 <View style={styles.dropdownList}>
@@ -2074,17 +2128,122 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                   </ScrollView>
                 </View>
               )}
+              </View>
 
               <Text style={styles.subLabel}>Losses (%)</Text>
               <TextInput
                 style={styles.input}
                 value={pvDraftInputs.losses}
                 onChangeText={(text) => setPvDraftField('losses', text)}
-                placeholder="e.g., 14"
+                placeholder="e.g., 16 (Michigan: 14% base + snow)"
                 placeholderTextColor={COLORS.placeholder}
                 keyboardType="numeric"
               />
 
+            </View>
+          )}
+
+          {/* ── Incentive / Credit Picker ── */}
+          {siteIncludes === 'farming' && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Credits & Incentives</Text>
+
+              {incentivesLoading && (
+                <Text style={styles.sectionSubtitle}>Loading programs…</Text>
+              )}
+              {!incentivesLoading && incentivesError && (
+                <Text style={[styles.sectionSubtitle, { color: '#c0392b' }]}>
+                  Could not load incentive catalog — {incentivesError}
+                </Text>
+              )}
+              {!incentivesLoading && !incentivesError && incentiveCatalog.length === 0 && (
+                <Text style={styles.sectionSubtitle}>No programs available.</Text>
+              )}
+
+              {!incentivesLoading && incentiveCatalog.length > 0 && (
+              <>
+              <View style={styles.selectorCard}>
+              <Text style={styles.subLabel}>Select programs</Text>
+              <Pressable
+                style={styles.dropdownButton}
+                onPress={() => setIncentiveDropdownOpen(!incentiveDropdownOpen)}
+              >
+                <Text style={styles.dropdownButtonText} numberOfLines={1}>
+                  {selectedIncentiveIds.length === 0
+                    ? 'None selected'
+                    : selectedIncentiveIds.length === incentiveCatalog.length
+                    ? 'All programs selected'
+                    : `${selectedIncentiveIds.length} of ${incentiveCatalog.length} selected`}
+                </Text>
+                <Text style={styles.dropdownArrow}>{incentiveDropdownOpen ? '^' : 'v'}</Text>
+              </Pressable>
+
+              {incentiveDropdownOpen && (
+                <View style={styles.dropdownList}>
+                  {/* Select All / Clear All */}
+                  <View style={styles.incentiveActions}>
+                    <Pressable
+                      style={styles.incentiveActionBtn}
+                      onPress={() => setSelectedIncentiveIds(incentiveCatalog.map(i => i.id))}
+                    >
+                      <Text style={styles.incentiveActionText}>Select All</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.incentiveActionBtn}
+                      onPress={() => setSelectedIncentiveIds([])}
+                    >
+                      <Text style={styles.incentiveActionText}>Clear All</Text>
+                    </Pressable>
+                  </View>
+                  <ScrollView nestedScrollEnabled={true} style={styles.incentiveScroll}>
+                    {incentiveCatalog.map((inc) => {
+                      const selected = selectedIncentiveIds.includes(inc.id);
+                      return (
+                        <React.Fragment key={inc.id}>
+                        <Pressable
+                          style={[styles.incentiveRow, selected && styles.incentiveRowSelected]}
+                          onPress={() => toggleIncentive(inc.id)}
+                        >
+                          <View style={styles.checkbox}>
+                            {selected && <Text style={styles.checkmark}>✓</Text>}
+                          </View>
+                          <View style={styles.incentiveInfo}>
+                            <Text style={styles.incentiveCat}>{inc.category}</Text>
+                            <Text style={styles.incentiveLabel}>{inc.name}</Text>
+                            <Text style={styles.incentiveDescText}>{inc.description}</Text>
+                          </View>
+                        </Pressable>
+                        {/* Inline grant amount picker for brownfield */}
+                        {inc.id === 'brownfield_egle' && selected && (
+                          <View style={{ paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#1a2a1a', borderBottomWidth: 1, borderColor: '#2d5a27' }}>
+                            <Text style={{ color: '#a8d5a2', fontSize: 12, fontWeight: '600', marginBottom: 5 }}>Grant Amount</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                              {[100000, 250000, 500000, 750000, 1000000].map(amt => (
+                                <Pressable
+                                  key={amt}
+                                  onPress={() => setIncentiveParams(p => ({ ...p, brownfield_egle_amount: amt }))}
+                                  style={{
+                                    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 5,
+                                    backgroundColor: incentiveParams.brownfield_egle_amount === amt ? '#4CAF50' : '#2a3a2a',
+                                    borderWidth: 1, borderColor: incentiveParams.brownfield_egle_amount === amt ? '#66BB6A' : '#3a4a3a',
+                                  }}>
+                                  <Text style={{ color: incentiveParams.brownfield_egle_amount === amt ? '#fff' : '#8a9a8a', fontSize: 12, fontWeight: '600' }}>
+                                    ${(amt / 1000).toFixed(0)}K
+                                  </Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+              </View>
+              </>
+              )}
             </View>
           )}
 
@@ -3123,7 +3282,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.headerBg,
   },
   backButton: {
     position: 'absolute',
@@ -3133,9 +3292,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 4,
-    backgroundColor: COLORS.headerText,
+    backgroundColor: COLORS.backBtnBg,
     borderWidth: 2,
-    borderColor: COLORS.headerBorder,
+    borderColor: COLORS.backBtnBorder,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -3151,7 +3310,7 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 2 }],
   },
   backButtonText: {
-    color: COLORS.accent,
+    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
@@ -3161,7 +3320,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingTop: Platform.OS === 'ios' ? 50 : 45,
-    paddingBottom: 15,
+    paddingBottom: 10,
     paddingHorizontal: 60,
     alignItems: 'center',
     backgroundColor: COLORS.headerBg,
@@ -3169,7 +3328,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.headerBorder,
   },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.headerText,
     textAlign: 'center',
@@ -3182,15 +3341,25 @@ const styles = StyleSheet.create({
   },
   formContainer: {
     flex: 1,
+    backgroundColor: COLORS.background,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 30,
+    paddingBottom: 110,
   },
   inputGroup: {
+    marginBottom: 16,
+  },
+  selectorCard: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    backgroundColor: COLORS.inputBg,
+    padding: 12,
+    gap: 8,
     marginBottom: 16,
   },
   label: {
@@ -3210,36 +3379,38 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   dropdownButton: {
-    backgroundColor: COLORS.inputBg,
-    borderWidth: 2,
-    borderColor: COLORS.borderLight,
-    borderRadius: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    backgroundColor: COLORS.inputBg,
   },
   dropdownButtonText: {
-    fontSize: 16,
     color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
   dropdownArrow: {
-    fontSize: 14,
     color: COLORS.textLight,
+    fontSize: 14,
+    marginLeft: 8,
   },
   dropdownList: {
-    backgroundColor: COLORS.inputBg,
-    borderWidth: 2,
+    marginTop: 8,
+    borderWidth: 1,
     borderColor: COLORS.borderLight,
-    borderRadius: 6,
-    marginTop: 4,
+    borderRadius: 8,
+    backgroundColor: COLORS.inputBg,
     maxHeight: 200,
   },
   dropdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.borderLight,
@@ -3253,6 +3424,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.borderLight,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    fontSize: 14,
     color: COLORS.text,
   },
   dropdownLoadingRow: {
@@ -3286,30 +3458,30 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.buttonBg,
     borderWidth: 1,
     borderColor: COLORS.buttonBorder,
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 8,
+    paddingVertical: 10,
     paddingHorizontal: 14,
     alignItems: 'center',
   },
   rotationSaveButtonText: {
     color: COLORS.buttonText,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
   },
   secondaryButton: {
     marginTop: 12,
     backgroundColor: COLORS.inputBg,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 8,
+    paddingVertical: 10,
     paddingHorizontal: 14,
     alignItems: 'center',
   },
   secondaryButtonText: {
     color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '700',
   },
   cropEditorError: {
     color: '#C54B4B',
@@ -3340,7 +3512,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   cropModalTitle: {
     fontSize: 18,
@@ -3379,8 +3551,8 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   cropListName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: COLORS.text,
   },
   cropListMeta: {
@@ -3407,7 +3579,7 @@ const styles = StyleSheet.create({
   textButtonText: {
     color: COLORS.accent,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   dangerText: {
     color: '#C54B4B',
@@ -3439,7 +3611,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   configModalTitle: {
     fontSize: 18,
@@ -3472,8 +3644,8 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   configListName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: COLORS.text,
   },
   configListMeta: {
@@ -3482,7 +3654,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   selectedModelTag: {
-    marginTop: 2,
+    marginTop: 6,
     color: COLORS.accent,
     fontSize: 12,
     fontWeight: '700',
@@ -3497,15 +3669,15 @@ const styles = StyleSheet.create({
     color: COLORS.accent,
   },
   dropdownItemText: {
-    fontSize: 16,
     color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
   dropdownEmptyText: {
-    padding: 14,
-    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
     color: COLORS.textLight,
-    fontStyle: 'italic',
-    textAlign: 'center',
   },
   checkboxGroup: {
     flexDirection: 'row',
@@ -3538,6 +3710,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   controlPanel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: COLORS.headerBg,
     borderTopWidth: 3,
     borderTopColor: COLORS.headerBorder,
@@ -4198,6 +4374,79 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginTop: 4,
+  },
+  // ── Incentive picker styles ──
+  section: {
+    marginTop: 18,
+    marginBottom: 6,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    marginBottom: 10,
+  },
+  incentiveActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  incentiveActionBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.buttonBg,
+    borderWidth: 1,
+    borderColor: COLORS.buttonBorder,
+  },
+  incentiveActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.buttonText,
+  },
+  incentiveScroll: {
+    maxHeight: 280,
+  },
+  incentiveRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
+  },
+  incentiveRowSelected: {
+    backgroundColor: 'rgba(159, 232, 112, 0.08)',
+  },
+  incentiveInfo: {
+    flex: 1,
+  },
+  incentiveCat: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: COLORS.accent || '#B24636',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  incentiveLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: 1,
+  },
+  incentiveDescText: {
+    fontSize: 11,
+    color: COLORS.textLight,
+    marginTop: 2,
+    lineHeight: 15,
   },
 });
 

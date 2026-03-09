@@ -26,6 +26,9 @@ const COLORS = {
   infoBg: '#FFFDF8',
   border: '#8B8680',           // warm gray – shared
   borderLight: '#D4D0C4',
+  // Back button (shared across all screens)
+  backBtnBg: '#5A554E',
+  backBtnBorder: '#3D3A36',
 };
 
 const LinearOptimizationScreen = ({ farms, onBack }) => {
@@ -89,12 +92,12 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
           cropLand: first.crop_land || 0,
           usableLand: first.usable_land || 0,
           maxSolar: first.max_solar || 0,
-          scenarios: scenarioKeys.map((k) => ({
-            label: k,
-            solarAcres: scenarios[k]?.A_s || 0,
-            cropAcres: scenarios[k]?.A_c_by_crop?.[cropName] || 0,
-            farmerNPV: scenarios[k]?.objective_farmer_NPV || 0,
-          })),
+          scenarios: [{
+            label: '#1',
+            solarAcres: scenarios['#1']?.A_s || 0,
+            cropAcres: scenarios['#1']?.A_c_by_crop?.[cropName] || 0,
+            farmerNPV: scenarios['#1']?.objective_farmer_NPV || 0,
+          }],
         });
       });
     });
@@ -251,11 +254,84 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
     loadEquations();
   }, []);
 
+  const buildNarrative = (cropName, scenario) => {
+    const fmt = (v) => Number.isFinite(v) ? `$${Math.round(v).toLocaleString()}` : '—';
+
+    const A_s = scenario.A_s ?? 0;
+    const A_c = scenario.A_c_by_crop?.[cropName] ?? 0;
+    const cropLand = scenario.crop_land ?? (A_s + A_c);
+    const usable = scenario.usable_land ?? 0;
+    const maxSolar = scenario.max_solar ?? A_s;
+    const pvLeasePerAc = scenario.pv_lease_per_acre ?? 0;
+    const leaseAnnual = scenario.lease_annual_per_acre ?? 0;
+    const leaseMonthly = scenario.lease_monthly_per_acre ?? 0;
+    const pvCropPerAc = scenario.pv_crop_per_acre?.[cropName] ?? 0;
+    const devPreLease = scenario.pv_solar_net_per_acre_no_lease ?? 0;
+    const devPostLease = scenario.pv_solar_net_per_acre_after_lease ?? 0;
+    const totalNPV = scenario.objective_farmer_NPV ?? 0;
+    const eqip = scenario.eqip_one_time_benefit;
+    const itc = scenario.effective_itc ?? 0;
+    const totalLeasePV = pvLeasePerAc * A_s;
+    const totalCropPV = pvCropPerAc * A_c;
+
+    const interconnectMw = scenario.interconnect_capacity_mw ?? null;
+    const minAgFraction = scenario.constraints_min_ag_fraction ?? 0.51;
+    const setbackFraction = scenario.constraints_setback_fraction ?? 0.10;
+
+    const atSolarCap = A_s > 0 && Math.abs(A_s - maxSolar) < 0.5;
+
+    let capReason = null;
+    if (atSolarCap) {
+      if (interconnectMw != null && maxSolar < usable - 0.5) {
+        capReason = `the ${interconnectMw} MW interconnect cap in the model (${maxSolar.toFixed(1)} ac at this site's panel density)`;
+      } else if (Math.abs(maxSolar - usable) < 0.5) {
+        capReason = `property setbacks (${(setbackFraction * 100).toFixed(0)}%), which reduce available solar land from ${cropLand.toFixed(1)} to ${usable.toFixed(1)} acres`;
+      } else {
+        capReason = `a project cap of ${maxSolar.toFixed(1)} acres (prime soil or zoning limit)`;
+      }
+    }
+
+    let text = `Out of ${cropLand.toFixed(1)} farmable acres, the model allocates ${A_s.toFixed(2)} acres to solar and ${A_c.toFixed(2)} acres to ${cropName} farming.`;
+
+    if (atSolarCap) {
+      text += ` Solar is pushed to its maximum of ${maxSolar.toFixed(1)} acres — constrained by ${capReason} — because the solar lease rate (${fmt(leaseAnnual)}/ac/yr) exceeds crop income on a present-value basis.`;
+    }
+
+    text += ` The ${A_c.toFixed(1)} crop acres satisfy the required minimum of ${(minAgFraction * 100).toFixed(0)}% agriculture.`;
+
+    text += `\n\nThe solar developer earns ${fmt(devPreLease)}/ac in project NPV before the lease, retaining ${fmt(devPostLease)}/ac after paying you. You receive ${fmt(leaseAnnual)}/ac/yr (${fmt(leaseMonthly)}/ac/mo) in solar lease cash — worth ${fmt(pvLeasePerAc)}/ac in present value, totaling ${fmt(totalLeasePV)} across all ${A_s.toFixed(1)} solar acres. Your ${cropName} on the remaining land adds ${fmt(pvCropPerAc)}/ac, or ${fmt(totalCropPV)} total, in present-value net farm income.`;
+
+    if (Number.isFinite(eqip) && eqip > 0) {
+      text += ` A one-time EQIP conservation payment of ${fmt(eqip)} is also included.`;
+    }
+
+    if (itc > 0) {
+      text += ` This scenario uses a ${(itc * 100).toFixed(0)}% ITC, boosting developer economics and supporting a higher lease rate to you.`;
+    }
+
+    text += `\n\nYour combined net present value — lease income plus crop income${Number.isFinite(eqip) && eqip > 0 ? ' plus EQIP' : ''} — is ${fmt(totalNPV)}.`;
+
+    return text;
+  };
+
   const renderScenario = (cropName, scenarioKey, scenario) => {
     const pvCrop = scenario.pv_crop_per_acre?.[cropName];
+    const displayName = scenario.scenario_name || `${scenarioKey} ITC`;
+    const incentives = scenario.incentives_applied || [];
     return (
       <View key={scenarioKey} style={styles.scenarioCard}>
-        <Text style={styles.scenarioTitle}>{scenarioKey} ITC</Text>
+        <Text style={styles.scenarioTitle}>{displayName}</Text>
+        {incentives.length > 0 && (
+          <View style={styles.incentiveList}>
+            {incentives.map((inc) => (
+              <View key={inc.id} style={styles.incentiveItem}>
+                <Text style={styles.incentiveBadge}>{inc.category}</Text>
+                <Text style={styles.incentiveName}>{inc.name}</Text>
+                <Text style={styles.incentiveDesc}>{inc.description}</Text>
+              </View>
+            ))}
+          </View>
+        )}
         <View style={styles.row}><Text style={styles.label}>Solar acres</Text><Text style={styles.value}>{fmtAcres(scenario.A_s)}</Text></View>
         <View style={styles.row}><Text style={styles.label}>Crop acres</Text><Text style={styles.value}>{fmtAcres(scenario.A_c_by_crop?.[cropName])}</Text></View>
         <View style={styles.row}><Text style={styles.label}>Developer NPV/ac (pre-lease)</Text><Text style={styles.value}>{fmtMoney(scenario.pv_solar_net_per_acre_no_lease)}</Text></View>
@@ -264,13 +340,17 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         <View style={styles.row}><Text style={styles.label}>Farmer lease ($/ac/mo)</Text><Text style={styles.value}>{fmtMoney(scenario.lease_monthly_per_acre)}</Text></View>
         <View style={styles.row}><Text style={styles.label}>PV net crop ({cropName})</Text><Text style={styles.value}>{fmtMoney(pvCrop)}</Text></View>
         <View style={styles.row}><Text style={styles.label}>Usable land</Text><Text style={styles.value}>{fmtAcres(scenario.usable_land)}</Text></View>
+        {Number.isFinite(scenario.eqip_one_time_benefit) && scenario.eqip_one_time_benefit > 0 && (
+          <View style={styles.row}><Text style={styles.label}>EQIP one-time benefit</Text><Text style={styles.value}>{fmtMoney(scenario.eqip_one_time_benefit)}</Text></View>
+        )}
         <View style={styles.row}><Text style={styles.label}>Objective (farmer NPV)</Text><Text style={styles.value}>{fmtMoney(scenario.objective_farmer_NPV)}</Text></View>
+        <Text style={styles.narrativeParagraph}>{buildNarrative(cropName, scenario)}</Text>
       </View>
     );
   };
 
   const renderReport = (optimization) => {
-    // optimization shape: { [cropName]: { '30%': scenario, '40%': scenario, '50%': scenario } }
+    // optimization shape: { [cropName]: { '#1': scenario, '#2': scenario, '#3': scenario } }
     if (!optimization || typeof optimization !== 'object') return null;
     const cropNames = Object.keys(optimization);
     return cropNames.map((crop) => {
@@ -279,7 +359,7 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         <View key={crop} style={styles.cropCard}>
           <Text style={styles.cropTitle}>{crop}</Text>
           <View style={styles.scenarioRow}>
-            {Object.entries(scenarios).map(([key, scenario]) => renderScenario(crop, key, scenario))}
+            {scenarios['#1'] && renderScenario(crop, '#1', scenarios['#1'])}
           </View>
         </View>
       );
@@ -288,19 +368,19 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.headerBg} />
+
+      {/* Back Button */}
+      <Pressable
+        style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+        onPress={onBack}
+      >
+        <Text style={styles.backButtonText}>←</Text>
+      </Pressable>
 
       {/* Header */}
       <View style={styles.header}>
-        <Pressable
-          style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-          onPress={onBack}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </Pressable>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Agrivoltaics Analysis Results</Text>
-        </View>
+        <Text style={styles.headerTitle}>Agrivoltaics Analysis Results</Text>
       </View>
 
       {/* Graph Display Area */}
@@ -374,29 +454,28 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.headerBg,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingTop: Platform.OS === 'ios' ? 50 : 45,
-    paddingBottom: 15,
-    paddingHorizontal: 20,
+    paddingBottom: 10,
+    paddingHorizontal: 60,
+    alignItems: 'center',
     backgroundColor: COLORS.headerBg,
     borderBottomWidth: 3,
     borderBottomColor: COLORS.headerBorder,
   },
   backButton: {
     position: 'absolute',
+    top: 70,
     left: 20,
-    top: Platform.OS === 'ios' ? 50 : 45,
     zIndex: 100,
     width: 36,
     height: 36,
     borderRadius: 4,
-    backgroundColor: COLORS.headerText,
+    backgroundColor: COLORS.backBtnBg,
     borderWidth: 2,
-    borderColor: COLORS.headerBorder,
+    borderColor: COLORS.backBtnBorder,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -412,7 +491,7 @@ const styles = StyleSheet.create({
     transform: [{ translateY: 2 }],
   },
   backButtonText: {
-    color: COLORS.accentRed,
+    color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     textAlign: 'center',
@@ -420,12 +499,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
     lineHeight: 20,
   },
-  headerContent: {
-    flex: 1,
-    alignItems: 'center',
-  },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.headerText,
     textAlign: 'center',
@@ -628,6 +703,32 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 6,
   },
+  incentiveList: {
+    marginBottom: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: '#9FE870',
+    paddingLeft: 8,
+  },
+  incentiveItem: {
+    marginBottom: 5,
+  },
+  incentiveBadge: {
+    color: '#9FE870',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  incentiveName: {
+    color: '#F5E6C8',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  incentiveDesc: {
+    color: '#B0A898',
+    fontSize: 10,
+    lineHeight: 14,
+  },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -648,6 +749,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 8,
     marginBottom: 6,
+  },
+  narrativeParagraph: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#3A3A3A',
+    color: '#B8B0A4',
+    fontSize: 12,
+    lineHeight: 18,
+    fontStyle: 'italic',
   },
   logsContainer: {
     marginTop: 12,

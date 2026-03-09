@@ -927,6 +927,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
     textAlignVertical: 'center',
+    lineHeight: 20,
   },
   content: {
     flex: 1,

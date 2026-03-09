@@ -67,12 +67,12 @@ async function main() {
     pvwatts: {
       lat: 42.745,
       lon: -84.545,
-      system_capacity: 9.0 * 200, // kW per acre × acres
-      module_type: 0, // 0=Standard, 1=Premium, 2=Thin film
-      array_type: 1, // 0=fixed open rack, 1=fixed roof, 2=1-axis, 3=1-axis backtracking, 4=2-axis
-      tilt: 30,
-      azimuth: 180,
-      losses: 14,
+      system_capacity: 9.0 * 200, // 200 kW/acre — agrivoltaic row-spacing standard for Michigan
+      module_type: 0,             // 0 = Standard (most common for utility-scale MI)
+      array_type: 0,              // 0 = Fixed Open Rack (best for agrivoltaic crop/equipment access)
+      tilt: 35,                   // 35° optimal for Michigan ~42°N latitude
+      azimuth: 180,               // 180° = due south (optimal for Northern Hemisphere)
+      losses: 16,                 // 16% = NREL 14% base + ~2% Michigan snow/soiling
     },
     modelFlags: {},
   };

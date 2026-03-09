@@ -123,3 +123,7 @@ expo-env.d.ts
 
 # Old RN folders (if they exist)
 OptimizationToolRN/
+
+# Google Cloud management scripts (contain project IDs - not for source control)
+scripts/gcloud-start.ps1
+scripts/gcloud-stop.ps1
