@@ -15,7 +15,7 @@ dotenv.config();
 const farmRoutes = require('./routes/farmHandler');
 const geoRoutes = require('./routes/geo');
 const cropRoutes = require('./routes/crops');
-const { router: reportRoutes } = require('./routes/reportsHandler');
+const reportRoutes = require('./routes/reportsHandler').router;
 const linearOptimizationRoutes = require('./routes/linearOptimization');
 const modelRoutes = require('./routes/models');
 const authRoutes = require('./routes/auth');
