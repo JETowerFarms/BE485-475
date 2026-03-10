@@ -114,6 +114,8 @@ pgadmin_data/
 .env
 .env.local
 .env.*.local
+.env.docker
+.env.*.docker
 
 # Expo (legacy)
 .expo/

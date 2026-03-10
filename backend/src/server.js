@@ -53,13 +53,20 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Rate limiting - global for /api/
-// TODO: Add stricter rate limits for sensitive endpoints (e.g., auth routes if added)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
   message: 'Too many requests from this IP, please try again later.',
 });
 app.use('/api/', limiter);
+
+// Stricter rate limit for auth endpoints to prevent brute-force attacks
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 login attempts per 15 min per IP
+  message: 'Too many login attempts, please try again later.',
+  skipSuccessfulRequests: true, // Don't count successful logins
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -77,24 +84,11 @@ app.use('/api/crops', cropRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/linear-optimization', linearOptimizationRoutes);
 app.use('/api/models', modelRoutes);
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 
-// Root endpoint
+// Root endpoint - intentionally minimal to avoid disclosing API surface
 app.get('/', (req, res) => {
-  res.json({
-    name: 'Michigan Solar Optimization API',
-    version: '1.0.0',
-    endpoints: {
-      farms: '/api/farms',
-      geo: '/api/geo',
-      crops: '/api/crops',
-      reports: '/api/reports',
-      linearOptimization: '/api/linear-optimization',
-      models: '/api/models',
-      auth: '/api/auth',
-      health: '/health',
-    },
-  });
+  res.json({ status: 'ok' });
 });
 
 // 404 handler
