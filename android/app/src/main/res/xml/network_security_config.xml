@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- Cleartext blocked by default in release builds -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
+    <!-- Allow cleartext to local emulator host for dev builds only -->
     <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+    <!-- External CDN domains used by Leaflet/ESRI map tiles (HTTPS but also need to allow) -->
+    <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">services.arcgisonline.com</domain>
         <domain includeSubdomains="true">server.arcgisonline.com</domain>
         <domain includeSubdomains="true">unpkg.com</domain>

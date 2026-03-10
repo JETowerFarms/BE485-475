@@ -259,11 +259,30 @@ class LandConstraints:
     interconnect_capacity_mw: Optional[float] = None
 
     def usable_land(self) -> float:
-        """Max land available for solar: at most (1 - min_ag_fraction) of crop_land, reduced by setbacks."""
+        """Physical land available for solar after applying setback exclusions.
+
+        Setback acres are excluded from solar placement but remain available for
+        crops — they flow into the crop allocation automatically via the LP
+        coupling constraints (A_s + sum A_cj = crop_land).  The minimum
+        agriculture fraction requirement is enforced separately by LP constraint
+        #3 and must not be baked into this value, otherwise setback land would
+        be double-penalised (reduced from solar AND not counted toward the ag
+        floor), resulting in the model over-allocating to crops.
+        """
         crop_land = self.total_land - self.easement_acres - self.wetland_exclusion_acres
-        max_solar_share = crop_land * (1.0 - self.min_ag_fraction)
-        usable = max_solar_share * (1.0 - self.setback_fraction)
-        return max(0.0, usable)
+        return max(0.0, crop_land * (1.0 - self.setback_fraction))
+
+    def max_solar_acres(self) -> float:
+        """Best pre-LP estimate of actual solar acres (physical setback AND ag fraction limits).
+
+        Used for preliminary developer-economics calculations where the LP result
+        is not yet available.  Takes the minimum of the physical setback cap and
+        the ag-fraction cap so that both constraints are reflected proportionally.
+        """
+        crop_land = self.total_land - self.easement_acres - self.wetland_exclusion_acres
+        setback_limit = crop_land * (1.0 - self.setback_fraction)
+        ag_limit = max(0.0, crop_land - self.min_ag_fraction * self.total_land)
+        return max(0.0, min(setback_limit, ag_limit))
 
 
 @dataclass
@@ -614,6 +633,38 @@ def optimize_land_allocation(
         pv_crop_per_acre[i] * A_c_opts[i] for i in range(len(crops))
     )
 
+    # Determine which constraint is actually binding on solar allocation.
+    # Possible values:
+    #   "interconnect_cap"  — MW interconnect limit is the tightest max_solar candidate
+    #   "prime_soil_cap"    — max_prime_solar constraint is tightest
+    #   "zoning_cap"        — zoning_max_solar constraint is tightest
+    #   "usable_land_cap"   — setbacks/usable land limit is tightest (constraint #1/#4)
+    #   "min_ag_fraction"   — 49% land cap (min ag fraction constraint #3) is binding
+    #   None                — solar is below all caps (economics chose less solar)
+    _tol = 0.5
+    solar_cap_reason = None
+    if A_s_opt > 0:
+        interconnect_acres = (
+            constraints.interconnect_capacity_mw * solar.land_intensity_acres_per_MW
+            if constraints.interconnect_capacity_mw is not None else None
+        )
+        # Ag constraint cap: max solar allowed before violating minimum agriculture requirement
+        ag_cap_acres = crop_land - constraints.min_ag_fraction * constraints.total_land
+
+        if abs(A_s_opt - max_solar) < _tol:
+            # Constraint #4 (max_solar cap) is binding — identify which candidate drove it
+            if interconnect_acres is not None and abs(max_solar - interconnect_acres) < _tol:
+                solar_cap_reason = "interconnect_cap"
+            elif constraints.max_prime_solar is not None and abs(max_solar - constraints.max_prime_solar) < _tol:
+                solar_cap_reason = "prime_soil_cap"
+            elif constraints.zoning_max_solar is not None and abs(max_solar - constraints.zoning_max_solar) < _tol:
+                solar_cap_reason = "zoning_cap"
+            else:
+                solar_cap_reason = "usable_land_cap"
+        elif abs(A_s_opt - ag_cap_acres) < _tol:
+            # Constraint #3 (min ag fraction) is binding — solar is capped at ~49% of land
+            solar_cap_reason = "min_ag_fraction"
+
     solar_pv_revenue, solar_pv_cost, solar_pv_no_lease = compute_solar_pv_no_lease(solar, econ)
     solar_pv_after_lease = solar_pv_no_lease - pv_lease_per_acre
     result = {
@@ -632,6 +683,7 @@ def optimize_land_allocation(
         "interconnect_capacity_mw": constraints.interconnect_capacity_mw,
         "constraints_min_ag_fraction": constraints.min_ag_fraction,
         "constraints_setback_fraction": constraints.setback_fraction,
+        "solar_cap_reason": solar_cap_reason,
     }
     return result
 
@@ -796,7 +848,7 @@ def score_scenario_fast(stack, solar, econ, lease, constraints, developer_retent
     per-crop solves.
     """
     effects = aggregate_effects(stack)
-    est_solar_acres = constraints.usable_land()
+    est_solar_acres = constraints.max_solar_acres()
 
     _, _, pv_net = compute_solar_pv_with_incentives(
         solar, econ, effects, est_solar_acres,
@@ -1023,7 +1075,7 @@ def evaluate_scenario(
     derive lease rate, run LP for each crop, return results or None on failure.
     """
     effects = aggregate_effects(stack)
-    est_solar_acres = constraints.usable_land()
+    est_solar_acres = constraints.max_solar_acres()
 
     # Developer economics with incentives (uses developer discount rate)
     pv_rev, pv_cost, pv_net = compute_solar_pv_with_incentives(

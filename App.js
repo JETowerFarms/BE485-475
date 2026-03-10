@@ -3,7 +3,8 @@ import { StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { loadFarms as loadFarmsFromStorage, saveFarms as saveFarmsToStorage } from './src/utils/farmStorage';
 import { loadLocation } from './src/utils/locationStorage';
-import { buildApiUrl } from './src/config/apiConfig';
+import { buildApiUrl, apiFetch } from './src/config/apiConfig';
+import { loadToken, setToken } from './src/utils/authStorage';
 import HomeScreen from './src/screens/HomeScreen';
 import CitySelectionScreen from './src/screens/CitySelectionScreen';
 import MapScreen from './src/screens/MapScreen';
@@ -27,6 +28,10 @@ export default function App() {
   const [isLoadingMcdData, setIsLoadingMcdData] = useState(false);
   const [savedLocation, setSavedLocation] = useState(null);
   const [isLoadingSavedLocation, setIsLoadingSavedLocation] = useState(true);
+
+  // Load persisted auth token into memory cache on startup
+  useEffect(() => { loadToken(); }, []);
+
   useEffect(() => {
     const loadSavedLocation = async () => {
       const storedLocation = await loadLocation();
@@ -56,7 +61,7 @@ export default function App() {
       const fetchMcdData = async () => {
         try {
           setIsLoadingMcdData(true);
-          const response = await fetch(buildApiUrl('/geo/michigan-mcd'));
+          const response = await apiFetch(buildApiUrl('/geo/michigan-mcd'));
           if (!response.ok) {
             throw new Error('Failed to fetch MCD data');
           }
@@ -138,7 +143,8 @@ export default function App() {
     setCurrentScreen('farmDescription');
   };
 
-  const handleLoginSuccess = (user) => {
+  const handleLoginSuccess = async (user, token) => {
+    await setToken(token);
     setCurrentUser(user);
     setCurrentScreen('home');
   };

@@ -35,7 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Polygon, Image as SvgImage, ClipPath, Defs, Rect, Pattern, Path, LinearGradient, Stop } from 'react-native-svg';
 import Carousel from 'react-native-reanimated-carousel';
 import { interpolate } from 'react-native-reanimated';
-import { buildApiUrl } from '../config/apiConfig';
+import { buildApiUrl, apiFetch } from '../config/apiConfig';
 
 // Dev-only: probe external connectivity for map/satellite assets.
 const runNetworkProbe = async () => {
@@ -740,7 +740,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
       setCropOptionsLoading(true);
       setCropOptionsError('');
       try {
-        const response = await fetch(buildApiUrl('/crops'));
+        const response = await apiFetch(buildApiUrl('/crops'));
         if (!response.ok) {
           const text = await response.text();
           throw new Error(`Backend API error (${response.status}): ${text}`);
@@ -939,7 +939,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     const isEdit = cropEditorMode === 'edit' && cropForm.id;
     setCropEditorSaving(true);
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         buildApiUrl(isEdit ? `/crops/${cropForm.id}` : '/crops'),
         {
           method: isEdit ? 'PUT' : 'POST',
@@ -968,7 +968,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     setCropEditorError('');
     setCropEditorSaving(true);
     try {
-      const response = await fetch(buildApiUrl(`/crops/${cropId}`), { method: 'DELETE' });
+      const response = await apiFetch(buildApiUrl(`/crops/${cropId}`), { method: 'DELETE' });
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || 'Failed to delete crop');
@@ -1026,7 +1026,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     setModelsLoading(true);
     setModelsError('');
     try {
-      const resp = await fetch(buildApiUrl('/models'));
+      const resp = await apiFetch(buildApiUrl('/models'));
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(text || `Failed to load models (${resp.status})`);
@@ -1051,7 +1051,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     (async () => {
       setIncentivesLoading(true);
       try {
-        const resp = await fetch(buildApiUrl('/linear-optimization/incentives'));
+        const resp = await apiFetch(buildApiUrl('/linear-optimization/incentives'));
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         if (!cancelled && Array.isArray(data?.incentives)) {
@@ -1520,7 +1520,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
     }));
 
     try {
-      const response = await fetch(buildApiUrl('/reports/analyze'), {
+      const response = await apiFetch(buildApiUrl('/reports/analyze'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ coordinates, userId: 'default-user' }),
@@ -1672,7 +1672,7 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
           },
         };
 
-        const response = await fetch(buildApiUrl('/linear-optimization'), {
+        const response = await apiFetch(buildApiUrl('/linear-optimization'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

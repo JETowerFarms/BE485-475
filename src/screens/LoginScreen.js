@@ -38,7 +38,7 @@ const LoginScreen = ({ onLoginSuccess }) => {
       if (!resp.ok) {
         throw new Error(data?.error || 'Login failed');
       }
-      onLoginSuccess(data.user);
+      onLoginSuccess(data.user, data.token);
     } catch (err) {
       setError(err?.message || 'Login failed');
     } finally {

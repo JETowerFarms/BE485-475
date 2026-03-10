@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import CrossPlatformMap from '../components/CrossPlatformMap';
-import { buildApiUrl } from '../config/apiConfig';
+import { buildApiUrl, apiFetch } from '../config/apiConfig';
 
 const concaveman = require('concaveman');
 
@@ -338,7 +338,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
   useEffect(() => {
     const loadFarmsFromBackend = async () => {
       try {
-        const response = await fetch(buildApiUrl('/farms?userId=default-user'));
+        const response = await apiFetch(buildApiUrl('/farms?userId=default-user'));
         if (response.ok) {
           const backendResponse = await response.json();
           if (backendResponse.success && Array.isArray(backendResponse.data)) {
@@ -456,7 +456,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
           coordinates: coordinates.slice(0, -1),
         };
         
-        const farmResponse = await fetch(buildApiUrl('/farms'), {
+        const farmResponse = await apiFetch(buildApiUrl('/farms'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody)
@@ -563,7 +563,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
               const payload = { coordinates, userId: 'default-user' };
               console.log('Analyze request payload:', JSON.stringify(payload, null, 2));
 
-              const response = await fetch(buildApiUrl('/reports/analyze'), {
+              const response = await apiFetch(buildApiUrl('/reports/analyze'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -655,7 +655,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
       async () => {
         try {
           // Delete from backend first
-          const response = await fetch(buildApiUrl(`/farms/${farmId}?userId=default-user`), {
+          const response = await apiFetch(buildApiUrl(`/farms/${farmId}?userId=default-user`), {
             method: 'DELETE',
           });
 
@@ -718,7 +718,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
     } : prev));
 
     try {
-      const response = await fetch(buildApiUrl(`/farms/${farmId}`), {
+      const response = await apiFetch(buildApiUrl(`/farms/${farmId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: 'default-user', name: newName }),

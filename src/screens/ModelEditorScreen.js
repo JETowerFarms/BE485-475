@@ -11,7 +11,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { buildApiUrl } from '../config/apiConfig';
+import { buildApiUrl, apiFetch } from '../config/apiConfig';
 
 const COLORS = {
   background: '#F5F0E6',
@@ -119,7 +119,7 @@ const ModelEditorScreen = ({ onBack }) => {
     setLoading(true);
     setError('');
     try {
-      const resp = await fetch(buildApiUrl('/models/template'));
+      const resp = await apiFetch(buildApiUrl('/models/template'));
       const data = await resp.json();
       if (!resp.ok) {
         throw new Error(data?.details?.join('; ') || data?.error || 'Failed to load template');
@@ -144,7 +144,7 @@ const ModelEditorScreen = ({ onBack }) => {
     setModelsLoading(true);
     setModelsError('');
     try {
-      const resp = await fetch(buildApiUrl('/models'));
+      const resp = await apiFetch(buildApiUrl('/models'));
       if (!resp.ok) {
         const text = await resp.text();
         throw new Error(text || `Failed to load models (${resp.status})`);
@@ -224,7 +224,7 @@ const ModelEditorScreen = ({ onBack }) => {
 
     setSaving(true);
     try {
-      const resp = await fetch(buildApiUrl('/models'), {
+      const resp = await apiFetch(buildApiUrl('/models'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -265,7 +265,7 @@ const ModelEditorScreen = ({ onBack }) => {
     setSaveMessage('');
     setDeleting(true);
     try {
-      const resp = await fetch(buildApiUrl(`/models/${selectedModelId}`), { method: 'DELETE' });
+      const resp = await apiFetch(buildApiUrl(`/models/${selectedModelId}`), { method: 'DELETE' });
       const data = await resp.json();
       if (!resp.ok) {
         throw new Error(data?.error || 'Failed to delete model');

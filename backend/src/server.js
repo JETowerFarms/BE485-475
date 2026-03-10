@@ -6,6 +6,7 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const dotenv = require('dotenv');
 const { testConnection } = require('./database');
+const { requireAuth } = require('./middleware/auth');
 
 // Load environment variables
 dotenv.config();
@@ -53,13 +54,20 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Rate limiting - global for /api/
-// TODO: Add stricter rate limits for sensitive endpoints (e.g., auth routes if added)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
   message: 'Too many requests from this IP, please try again later.',
 });
 app.use('/api/', limiter);
+
+// Stricter rate limit for login to prevent brute-force attacks
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per IP per window
+  message: 'Too many login attempts, please try again later.',
+  skipSuccessfulRequests: true,
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -70,14 +78,14 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API routes
-app.use('/api/farms', farmRoutes);
-app.use('/api/geo', geoRoutes);
-app.use('/api/crops', cropRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/linear-optimization', linearOptimizationRoutes);
-app.use('/api/models', modelRoutes);
-app.use('/api/auth', authRoutes);
+// API routes — auth is public (issues tokens); all others require a valid JWT
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/farms', requireAuth, farmRoutes);
+app.use('/api/geo', requireAuth, geoRoutes);
+app.use('/api/crops', requireAuth, cropRoutes);
+app.use('/api/reports', requireAuth, reportRoutes);
+app.use('/api/linear-optimization', requireAuth, linearOptimizationRoutes);
+app.use('/api/models', requireAuth, modelRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

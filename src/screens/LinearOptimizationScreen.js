@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Line, Rect, Circle, Text as SvgText, Polygon, G } from 'react-native-svg';
-import { buildApiUrl } from '../config/apiConfig';
+import { buildApiUrl, apiFetch } from '../config/apiConfig';
 
 // Shared palette to match the rest of the app
 const COLORS = {
@@ -242,7 +242,7 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
   useEffect(() => {
     const loadEquations = async () => {
       try {
-        const resp = await fetch(buildApiUrl('/models/template'));
+        const resp = await apiFetch(buildApiUrl('/models/template'));
         const data = await resp.json();
         if (resp.ok && data?.template?.equations?.length) {
           setEquations(data.template.equations);
