@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS models (
     installed_cost_per_MW DOUBLE PRECISION,
     site_prep_cost_per_acre DOUBLE PRECISION,
     grading_cost_per_acre DOUBLE PRECISION,
-    retilling_cost_per_acre DOUBLE PRECISION,
+    retiling_cost_per_acre DOUBLE PRECISION,
     interconnection_fraction DOUBLE PRECISION,
     bond_cost_per_acre DOUBLE PRECISION,
     vegetation_cost_per_acre DOUBLE PRECISION,
@@ -177,7 +177,7 @@ INSERT INTO models (
     installed_cost_per_MW,
     site_prep_cost_per_acre,
     grading_cost_per_acre,
-    retilling_cost_per_acre,
+    retiling_cost_per_acre,
     interconnection_fraction,
     bond_cost_per_acre,
     vegetation_cost_per_acre,
@@ -254,8 +254,8 @@ VALUES (
     0.0,
     0.25,
     0.51,
-    40.0,
-    40.0,
+    0,        -- constraints_max_prime_solar (0 = no cap; site-specific)
+    0,        -- constraints_zoning_max_solar (0 = no cap; site-specific)
     0.10,
     0.0,
     0.0,

@@ -108,7 +108,7 @@ class SolarParameters:
     installed_cost_per_MW: float  # $/MWac (overnight cost)
     site_prep_cost_per_acre: float  # $/acre
     grading_cost_per_acre: float  # $/acre
-    retilling_cost_per_acre: float  # $/acre (field retilling for solar installation)
+    retiling_cost_per_acre: float  # $/acre (subsurface drainage tile repair/replacement)
     interconnection_fraction: float  # fraction of installed cost used for upgrades
     bond_cost_per_acre: float  # $/acre (decommissioning assurance)
     vegetation_cost_per_acre: float  # $/acre-yr
@@ -180,7 +180,7 @@ class SolarParameters:
         inter_upgrade = self.interconnection_fraction * const_per_acre
         soft_costs = self.soft_cost_fraction * const_per_acre
         return (const_per_acre + self.site_prep_cost_per_acre +
-                self.grading_cost_per_acre + self.retilling_cost_per_acre +
+                self.grading_cost_per_acre + self.retiling_cost_per_acre +
                 self.bond_cost_per_acre + inter_upgrade + soft_costs)
 
     def opex_per_acre(self) -> float:
@@ -259,29 +259,50 @@ class LandConstraints:
     interconnect_capacity_mw: Optional[float] = None
 
     def usable_land(self) -> float:
-        """Physical land available for solar after applying setback exclusions.
+        """Physical maximum solar *panel* acres after applying the setback fraction.
 
-        Setback acres are excluded from solar placement but remain available for
-        crops — they flow into the crop allocation automatically via the LP
-        coupling constraints (A_s + sum A_cj = crop_land).  The minimum
-        agriculture fraction requirement is enforced separately by LP constraint
-        #3 and must not be baked into this value, otherwise setback land would
-        be double-penalised (reduced from solar AND not counted toward the ag
-        floor), resulting in the model over-allocating to crops.
+        ``A_s`` in the LP represents actual panel acres (not zone footprint).
+        The solar *zone* footprint is ``A_s / (1 - setback_fraction)``; the
+        setback buffer within that zone = ``A_s * setback_fraction /
+        (1 - setback_fraction)`` acres and can be used for crops.
+
+        The LP coupling constraint correctly accounts for the zone footprint so
+        the minimum-agriculture fraction is applied to *traditional* crop acres
+        (outside the zone) only.  This function returns the physical upper bound
+        on panel acres assuming the *entire* parcel were one solar zone; it is
+        always a loose bound in practice because the ag-fraction constraint will
+        bind first.
         """
         crop_land = self.total_land - self.easement_acres - self.wetland_exclusion_acres
         return max(0.0, crop_land * (1.0 - self.setback_fraction))
 
     def max_solar_acres(self) -> float:
-        """Best pre-LP estimate of actual solar acres (physical setback AND ag fraction limits).
+        """Best pre-LP estimate of actual solar *panel* acres.
 
         Used for preliminary developer-economics calculations where the LP result
-        is not yet available.  Takes the minimum of the physical setback cap and
-        the ag-fraction cap so that both constraints are reflected proportionally.
+        is not yet available.
+
+        The agriculture-fraction cap limits the solar *zone* footprint to
+        ``(1 - min_ag_fraction) * total_land`` acres.  Only the
+        ``(1 - setback_fraction)`` share of that zone is deployable as panels:
+
+            ag_panel_limit = (zone_cap) * (1 - setback_fraction)
+                           = (crop_land - min_ag_fraction * total_land)
+                             * (1 - setback_fraction)
+
+        The physical setback cap is the maximum panel acres if the entire parcel
+        were one zone: ``crop_land * (1 - setback_fraction)``.
+        The tighter of the two limits is returned.
         """
         crop_land = self.total_land - self.easement_acres - self.wetland_exclusion_acres
-        setback_limit = crop_land * (1.0 - self.setback_fraction)
-        ag_limit = max(0.0, crop_land - self.min_ag_fraction * self.total_land)
+        f = self.setback_fraction
+        setback_limit = crop_land * (1.0 - f)
+        # ag_limit: max panel acres before violating minimum-agriculture requirement.
+        # The zone footprint = panels / (1-f), so traditional crops = crop_land - zone
+        # = crop_land - panels/(1-f).  Require traditional crops >= min_ag * total:
+        #   crop_land - panels/(1-f) >= min_ag * total
+        #   panels <= (crop_land - min_ag * total) * (1-f)
+        ag_limit = max(0.0, (crop_land - self.min_ag_fraction * self.total_land) * (1.0 - f))
         return max(0.0, min(setback_limit, ag_limit))
 
 
@@ -553,14 +574,43 @@ def optimize_land_allocation(
 
     The optimisation problem is:
 
-        maximize    z = pv_lease * A_s + sum_j pv_crop_j * A_cj
-        subject to  A_s ≤ usable_land (solar limited by setbacks)
-                sum_j A_cj ≤ crop_land (crops not limited by setbacks)
-                sum_j A_cj ≥ min_ag_fraction * total_land
-                A_s ≤ max_solar
-                A_s + sum_j A_cj ≤ crop_land (coupling constraint)
-                A_s ≥ 0,
-                A_cj ≥ 0.
+        Let  f  = setback_fraction  (e.g. 0.10),
+             A_s   = solar *panel* acres  (LP decision variable)
+             A_cj  = traditional crop acres for crop j  (LP decision variable)
+
+        The solar *zone* footprint = A_s / (1 - f).
+        Setback buffer acres within zone = A_s * f / (1 - f)  (grows crops).
+        Traditional crop acres = A_c  (outside the zone).
+
+        Physical land budget:
+            zone_footprint + sum_j A_cj = crop_land
+            A_s / (1 - f)  + sum_j A_cj = crop_land
+
+        Minimum-agriculture constraint (traditional crops ≥ min_ag * total):
+            sum_j A_cj ≥ min_ag_fraction * total_land
+
+        Farmer income per panel acre includes lease income PLUS crop income from
+        the setback buffer: z_s = pv_lease + pv_crop_avg * f / (1 - f).
+
+        maximize    z = z_s * A_s + sum_j pv_crop_j * A_cj
+        subject to  A_s ≤ usable_land                       (physical panel cap)
+                    sum_j A_cj ≤ crop_land                  (traditional crop cap)
+                    sum_j A_cj ≥ min_ag_fraction * total_land
+                    A_s ≤ max_solar                          (prime/zoning/interconnect)
+                    A_s / (1-f) + sum_j A_cj ≤ crop_land   (coupling upper)
+                    A_s / (1-f) + sum_j A_cj ≥ crop_land   (coupling lower — all land used)
+                    A_s ≥ 0,  A_cj ≥ 0.
+
+        Algebraic solution for the ag-fraction cap on panel acres:
+            A_cj = crop_land - A_s/(1-f)  and  A_cj ≥ min_ag * total
+            ⟹ crop_land - A_s/(1-f) ≥ min_ag * total
+            ⟹ A_s ≤ (crop_land - min_ag * total) * (1 - f)
+
+        Example (100 ac, min_ag=0.51, f=0.10):
+            A_s ≤ (100 - 51) * 0.9 = 44.1 panel acres
+            Zone = 44.1 / 0.9 = 49 acres (exactly 49% zone footprint)
+            Setback buffer = 4.9 acres  (counted as bonus crop land)
+            Traditional crops = 51 acres
 
     SciPy's linprog minimises c^T x, so we minimise -z.
     """
@@ -569,29 +619,45 @@ def optimize_land_allocation(
 
     pv_crop_per_acre = [compute_crop_pv_per_acre(crop, econ, farmer) for crop in crops]
 
-    # Objective coefficients (minimisation): minimise -[pv_lease, pv_crop_1..J]
-    c = np.array([-pv_lease_per_acre] + [-pv for pv in pv_crop_per_acre], dtype=float)
+    # ── Setback factors ──────────────────────────────────────────────────────
+    # f  = setback fraction (e.g. 0.10 means 10% of zone is buffer, rest is panels).
+    # zone_factor  = 1/(1-f): each panel acre occupies this many zone acres.
+    # setback_factor = f/(1-f): each panel acre generates this many setback-buffer
+    #                  crop acres (within the zone) that earn crop income.
+    f = constraints.setback_fraction
+    zone_factor = 1.0 / (1.0 - f) if f < 1.0 else float('inf')
+    setback_factor = f / (1.0 - f) if f < 1.0 else 0.0
+
+    # Effective PV for the solar decision variable: includes lease income on panel
+    # acres AND crop income on the setback buffer that accompanies those panels.
+    avg_pv_crop = float(np.mean(pv_crop_per_acre)) if pv_crop_per_acre else 0.0
+    pv_solar_eff = pv_lease_per_acre + avg_pv_crop * setback_factor
+
+    # Objective coefficients (minimisation): minimise -[pv_solar_eff, pv_crop_1..J]
+    c = np.array([-pv_solar_eff] + [-pv for pv in pv_crop_per_acre], dtype=float)
 
     # Inequality constraints A_ub x ≤ b_ub
     A_ub = []
     b_ub = []
 
-    usable_land = constraints.usable_land()  # Land available for solar (includes setbacks)
-    crop_land = constraints.total_land - constraints.easement_acres - constraints.wetland_exclusion_acres  # Land available for crops (no setbacks)
+    usable_land = constraints.usable_land()  # Physical max panel acres = crop_land*(1-f)
+    crop_land = constraints.total_land - constraints.easement_acres - constraints.wetland_exclusion_acres
 
-    # 1) A_s ≤ usable_land (solar limited by setbacks)
+    # 1) A_s ≤ usable_land  (physical cap: panel acres ≤ crop_land*(1-f))
     A_ub.append([1.0] + [0.0] * len(crops))
     b_ub.append(usable_land)
 
-    # 2) sum A_cj ≤ crop_land (crops can use land without setback restrictions)
+    # 2) sum A_cj ≤ crop_land  (traditional crop acres cannot exceed total parcel)
     A_ub.append([0.0] + [1.0] * len(crops))
     b_ub.append(crop_land)
 
-    # 3) -sum A_cj ≤ -min_ag_fraction * total_land (ensure minimum agriculture)
+    # 3) -sum A_cj ≤ -min_ag_fraction * total_land
+    #    Traditional crop acres (outside zone) must meet minimum agriculture floor.
+    #    Setback buffer acres within the zone are bonus crop land above this floor.
     A_ub.append([0.0] + [-1.0] * len(crops))
     b_ub.append(-constraints.min_ag_fraction * constraints.total_land)
 
-    # 4) A_s ≤ max_solar (prime cap, zoning cap, interconnect cap, usable land)
+    # 4) A_s ≤ max_solar (prime cap, zoning cap, interconnect cap, physical cap)
     max_solar_candidates = [usable_land]
     if constraints.max_prime_solar is not None:
         max_solar_candidates.append(constraints.max_prime_solar)
@@ -604,12 +670,15 @@ def optimize_land_allocation(
     A_ub.append([1.0] + [0.0] * len(crops))
     b_ub.append(max_solar)
 
-    # 5) A_s + sum A_cj ≤ crop_land (coupling — no double-counting land)
-    A_ub.append([1.0] + [1.0] * len(crops))
+    # 5) zone_factor * A_s + sum A_cj ≤ crop_land
+    #    Zone footprint + traditional crops ≤ total land  (no over-allocation).
+    #    zone_factor = 1/(1-f) converts panel acres → zone footprint acres.
+    A_ub.append([zone_factor] + [1.0] * len(crops))
     b_ub.append(crop_land)
 
-    # 6) -(A_s + sum A_cj) ≤ -crop_land  (all land is in use — farmer is already farming)
-    A_ub.append([-1.0] + [-1.0] * len(crops))
+    # 6) -(zone_factor * A_s + sum A_cj) ≤ -crop_land
+    #    All land is in use — farmer was already farming every acre.
+    A_ub.append([-zone_factor] + [-1.0] * len(crops))
     b_ub.append(-crop_land)
 
     A_ub = np.array(A_ub, dtype=float)
@@ -629,8 +698,16 @@ def optimize_land_allocation(
 
     A_s_opt = float(res.x[0])
     A_c_opts = [float(v) for v in res.x[1:]]
-    objective_value = pv_lease_per_acre * A_s_opt + sum(
-        pv_crop_per_acre[i] * A_c_opts[i] for i in range(len(crops))
+    # Setback buffer acres that grow crops within the solar zone
+    setback_crop_acres = A_s_opt * setback_factor
+    solar_zone_acres = A_s_opt * zone_factor if f < 1.0 else A_s_opt
+    # Farmer NPV = lease on panel acres + setback crop income + traditional crop income.
+    # pv_solar_eff already encodes (lease + avg_crop * setback_factor) per panel acre,
+    # so the LP objective value equals the true farmer NPV:
+    #   pv_solar_eff * A_s + sum(pv_crop_j * A_cj)
+    objective_value = (
+        pv_solar_eff * A_s_opt
+        + sum(pv_crop_per_acre[i] * A_c_opts[i] for i in range(len(crops)))
     )
 
     # Determine which constraint is actually binding on solar allocation.
@@ -648,8 +725,10 @@ def optimize_land_allocation(
             constraints.interconnect_capacity_mw * solar.land_intensity_acres_per_MW
             if constraints.interconnect_capacity_mw is not None else None
         )
-        # Ag constraint cap: max solar allowed before violating minimum agriculture requirement
-        ag_cap_acres = crop_land - constraints.min_ag_fraction * constraints.total_land
+        # Ag constraint cap: max *panel* acres before violating minimum agriculture requirement.
+        # Derived from zone coupling: crop_land - A_s/(1-f) >= min_ag*total
+        #   => A_s <= (crop_land - min_ag*total) * (1-f)
+        ag_cap_acres = max(0.0, (crop_land - constraints.min_ag_fraction * constraints.total_land) * (1.0 - f))
 
         if abs(A_s_opt - max_solar) < _tol:
             # Constraint #4 (max_solar cap) is binding — identify which candidate drove it
@@ -668,8 +747,22 @@ def optimize_land_allocation(
     solar_pv_revenue, solar_pv_cost, solar_pv_no_lease = compute_solar_pv_no_lease(solar, econ)
     solar_pv_after_lease = solar_pv_no_lease - pv_lease_per_acre
     result = {
+        # ── Land allocation ──────────────────────────────────────────────────
+        # A_s: actual deployable solar *panel* acres
         "A_s": A_s_opt,
+        # solar_zone_acres: physical zone footprint (panels + setback buffer)
+        #   = A_s / (1 - setback_fraction)
+        "solar_zone_acres": round(solar_zone_acres, 4),
+        # setback_crop_acres: buffer acres within solar zone that can grow crops
+        #   = A_s * setback_fraction / (1 - setback_fraction)
+        "setback_crop_acres": round(setback_crop_acres, 4),
+        # A_c_by_crop: traditional crop acres *outside* the solar zone
         "A_c_by_crop": {crop.name: A_c_opts[i] for i, crop in enumerate(crops)},
+        # effective_total_crop_acres: all land actually farmed (traditional + setback buffer)
+        "effective_total_crop_acres": round(
+            sum(A_c_opts) + setback_crop_acres, 4
+        ),
+        # ── Financial metrics ────────────────────────────────────────────────
         "pv_lease_per_acre": pv_lease_per_acre,
         "lease_annual_per_acre": L_solar,
         "lease_monthly_per_acre": L_solar / 12.0,
@@ -677,6 +770,7 @@ def optimize_land_allocation(
         "pv_solar_net_per_acre_after_lease": solar_pv_after_lease,
         "pv_solar_net_per_acre_no_lease": solar_pv_no_lease,
         "objective_farmer_NPV": float(objective_value),
+        # ── Constraint metadata ──────────────────────────────────────────────
         "usable_land": usable_land,
         "crop_land": crop_land,
         "max_solar": max_solar,
@@ -1240,7 +1334,7 @@ def main(
         'installed_cost_per_MW': pick('installed_cost_per_MW'),
         'site_prep_cost_per_acre': pick('site_prep_cost_per_acre'),
         'grading_cost_per_acre': pick('grading_cost_per_acre'),
-        'retilling_cost_per_acre': pick('retilling_cost_per_acre'),
+        'retiling_cost_per_acre': pick('retiling_cost_per_acre'),
         'interconnection_fraction': pick('interconnection_fraction'),
         'bond_cost_per_acre': pick('bond_cost_per_acre'),
         'vegetation_cost_per_acre': pick('vegetation_cost_per_acre'),

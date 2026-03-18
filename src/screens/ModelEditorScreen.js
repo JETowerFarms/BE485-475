@@ -43,7 +43,7 @@ const EDITABLE_FIELDS = [
   { key: 'installedCostPerMW', label: 'Installed cost per MW', type: 'number' },
   { key: 'sitePrepCostPerAcre', label: 'Site prep cost per acre', type: 'number' },
   { key: 'gradingCostPerAcre', label: 'Grading cost per acre', type: 'number' },
-  { key: 'retillingCostPerAcre', label: 'Retilling cost per acre', type: 'number' },
+  { key: 'retilingCostPerAcre', label: 'Retiling cost per acre', type: 'number' },
   { key: 'interconnectionFraction', label: 'Interconnection fraction', type: 'number' },
   { key: 'bondCostPerAcre', label: 'Bond cost per acre', type: 'number' },
   { key: 'vegetationCostPerAcre', label: 'Vegetation cost per acre', type: 'number' },

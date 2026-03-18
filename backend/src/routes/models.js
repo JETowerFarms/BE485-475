@@ -5,7 +5,7 @@ const { db } = require('../database');
 const router = express.Router();
 
 const DEFAULT_EQUATIONS = [
-  { title: 'Solar CAPEX per acre', eq: 'CAPEX = [(C_install / α) + C_site + C_grade + C_retill + C_bond + f_inter × (C_install / α)] × (1 + f_soft)' },
+  { title: 'Solar CAPEX per acre', eq: 'CAPEX = [(C_install / α) + C_site + C_grade + C_retile + C_bond + f_inter × (C_install / α)] × (1 + f_soft)' },
   { title: 'Construction financing (IDC)', eq: 'ConFinFactor = 0.5×[1 + (1−τ)×((1+r_con)^1.5 − 1)] + 0.5×[1 + (1−τ)×((1+r_con)^0.5 − 1)]' },
   { title: 'Solar energy (year t)', eq: 'E_t = 8760 × CF × R_dc:ac × clip_limit × 1000 × (1−d)^t × η_avail × η_curt(t) × η_export' },
   { title: 'Curtailment (increasing)', eq: 'η_curt(t) = η_curt × (1 − c_inc × (t−2))' },
@@ -33,7 +33,7 @@ const FIELD_DEFS = [
   { camel: 'installedCostPerMW', column: 'installed_cost_per_mw' },
   { camel: 'sitePrepCostPerAcre', column: 'site_prep_cost_per_acre' },
   { camel: 'gradingCostPerAcre', column: 'grading_cost_per_acre' },
-  { camel: 'retillingCostPerAcre', column: 'retilling_cost_per_acre' },
+  { camel: 'retilingCostPerAcre', column: 'retiling_cost_per_acre' },
   { camel: 'interconnectionFraction', column: 'interconnection_fraction' },
   { camel: 'bondCostPerAcre', column: 'bond_cost_per_acre' },
   { camel: 'vegetationCostPerAcre', column: 'vegetation_cost_per_acre' },
@@ -188,7 +188,7 @@ router.get('/template', async (req, res) => {
       installedCostPerMW: 1610000.0,
       sitePrepCostPerAcre: 36800.0,
       gradingCostPerAcre: 8286.0,
-      retillingCostPerAcre: 950.0,
+      retilingCostPerAcre: 950.0,
       interconnectionFraction: 0.30,
       bondCostPerAcre: 10000.0,
       vegetationCostPerAcre: 225.0,

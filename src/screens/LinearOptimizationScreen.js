@@ -224,7 +224,7 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
   };
 
   const EQUATIONS = [
-    { title: 'Solar CAPEX per acre', eq: 'CAPEX = (C_install / α) + C_site + C_grade + C_retill + C_bond + f_inter × (C_install / α)' },
+    { title: 'Solar CAPEX per acre', eq: 'CAPEX = (C_install / α) + C_site + C_grade + C_retile + C_bond + f_inter × (C_install / α)' },
     { title: 'Solar energy (year t)', eq: 'E_t = 8760 × CF × 1000 × (1 − d)^t × η_avail × η_curt × η_export' },
     { title: 'Solar revenue (year t)', eq: 'Rev_t = (E_t / α) × P_elec × (1 + g_elec)^t' },
     { title: 'Solar NPV (no lease)', eq: 'NPV_solar = Σ_{t=0…T} (Rev_t − Cost_t) / (1+r)^t' },
@@ -277,24 +277,43 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
     const interconnectMw = scenario.interconnect_capacity_mw ?? null;
     const minAgFraction = scenario.constraints_min_ag_fraction ?? 0.51;
     const setbackFraction = scenario.constraints_setback_fraction ?? 0.10;
+    const capReasonCode = scenario.solar_cap_reason ?? null; // authoritative from backend LP
 
-    const atSolarCap = A_s > 0 && Math.abs(A_s - maxSolar) < 0.5;
+    // Use the backend's solar_cap_reason directly — it is set only when a constraint is
+    // genuinely binding on A_s, so we don't need to guess from numeric tolerances here.
+    const atSolarCap = A_s > 0 && capReasonCode != null;
 
     let capReason = null;
     if (atSolarCap) {
-      if (interconnectMw != null && maxSolar < usable - 0.5) {
-        capReason = `the ${interconnectMw} MW interconnect cap in the model (${maxSolar.toFixed(1)} ac at this site's panel density)`;
-      } else if (Math.abs(maxSolar - usable) < 0.5) {
-        capReason = `property setbacks (${(setbackFraction * 100).toFixed(0)}%), which reduce available solar land from ${cropLand.toFixed(1)} to ${usable.toFixed(1)} acres`;
-      } else {
-        capReason = `a project cap of ${maxSolar.toFixed(1)} acres (prime soil or zoning limit)`;
+      // solar zone footprint = panel acres / (1 - setback)
+      const solarZoneAcres = scenario.solar_zone_acres ?? (A_s / (1 - setbackFraction));
+      const solarZonePct = (solarZoneAcres / cropLand * 100).toFixed(1);
+
+      switch (capReasonCode) {
+        case 'interconnect_cap':
+          capReason = `the ${interconnectMw} MW interconnect cap (${A_s.toFixed(1)} panel ac = ${solarZoneAcres.toFixed(1)} ac zone at this site's panel density)`;
+          break;
+        case 'min_ag_fraction':
+          capReason = `the minimum ${(minAgFraction * 100).toFixed(0)}% agriculture requirement — the solar zone occupies ${solarZonePct}% of the farm, leaving exactly ${(minAgFraction * 100).toFixed(0)}% for crops`;
+          break;
+        case 'usable_land_cap':
+          capReason = `property setbacks (${(setbackFraction * 100).toFixed(0)}%), which reduce available panel land from ${cropLand.toFixed(1)} to ${usable.toFixed(1)} acres`;
+          break;
+        case 'prime_soil_cap':
+          capReason = `a prime soil cap of ${maxSolar.toFixed(1)} panel acres`;
+          break;
+        case 'zoning_cap':
+          capReason = `a zoning cap of ${maxSolar.toFixed(1)} panel acres`;
+          break;
+        default:
+          capReason = `a project cap of ${maxSolar.toFixed(1)} acres`;
       }
     }
 
-    let text = `Out of ${cropLand.toFixed(1)} farmable acres, the model allocates ${A_s.toFixed(2)} acres to solar and ${A_c.toFixed(2)} acres to ${cropName} farming.`;
+    let text = `Out of ${cropLand.toFixed(1)} farmable acres, the model allocates ${A_s.toFixed(2)} panel acres to solar and ${A_c.toFixed(2)} acres to ${cropName} farming.`;
 
     if (atSolarCap) {
-      text += ` Solar is pushed to its maximum of ${maxSolar.toFixed(1)} acres — constrained by ${capReason} — because the solar lease rate (${fmt(leaseAnnual)}/ac/yr) exceeds crop income on a present-value basis.`;
+      text += ` Solar is pushed to its maximum — constrained by ${capReason} — because the solar lease rate (${fmt(leaseAnnual)}/ac/yr) exceeds crop income on a present-value basis.`;
     }
 
     text += ` The ${A_c.toFixed(1)} crop acres satisfy the required minimum of ${(minAgFraction * 100).toFixed(0)}% agriculture.`;

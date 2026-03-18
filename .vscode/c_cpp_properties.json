@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/backend/node_modules/node-addon-api",
+                "${env:LOCALAPPDATA}/node-gyp/Cache/22.14.0/include/node"
+            ],
+            "defines": [
+                "NAPI_VERSION=8"
+            ],
+            "compilerPath": "cl.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-msvc-x64"
+        }
+    ],
+    "version": 4
+}

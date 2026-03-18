@@ -83,7 +83,7 @@ const DEFAULT_MODEL_CONFIG = {
   installed_cost_per_MW: 1610000.0,
   site_prep_cost_per_acre: 36800.0,
   grading_cost_per_acre: 8286.0,
-  retilling_cost_per_acre: 950.0,
+  retiling_cost_per_acre: 950.0,
   interconnection_fraction: 0.3,
   bond_cost_per_acre: 10000.0,
   vegetation_cost_per_acre: 225.0,
@@ -102,8 +102,8 @@ const DEFAULT_MODEL_CONFIG = {
   lease_escalation_rate: 0.0,
   developer_retention_fraction: 0.25,
   constraints_min_ag_fraction: 0.51,
-  constraints_max_prime_solar: 40.0,
-  constraints_zoning_max_solar: 40.0,
+  constraints_max_prime_solar: 0,       // 0 = no cap (site-specific; set per-model when known)
+  constraints_zoning_max_solar: 0,      // 0 = no cap (site-specific; set per-model when known)
   constraints_setback_fraction: 0.10,
   constraints_easement_acres: 0.0,
   constraints_wetland_exclusion_acres: 0.0,

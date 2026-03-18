@@ -2771,6 +2771,76 @@ const FarmDescriptionScreen = ({ farms, county, city, onNavigateBack, onNavigate
                         </View>
                       </View>
                     )}
+
+                    {/* Solar Suitability Component Breakdown */}
+                    {expandedViewType.id === 'solar' && (() => {
+                      const summary = currentFarm?.backendAnalysis?.solarSuitability?.summary;
+                      if (!summary) return null;
+                      const ca = summary.componentAverages || {};
+                      const rd = summary.rawDataRanges || {};
+                      const insideCount = summary.insideSampleCount ?? 0;
+                      const uniqueCount = summary.uniqueScoreCount ?? 0;
+                      const COMPONENT_LABELS = {
+                        land_cover: { label: 'Land Cover (NLCD)', weight: '40%' },
+                        slope:      { label: 'Slope (LandFire)',  weight: '20%' },
+                        transmission: { label: 'Transmission',    weight: '30%' },
+                        population: { label: 'Population',        weight: '10%' },
+                      };
+                      return (
+                        <View style={styles.solarDiagnosticBox}>
+                          {/* Sampling info */}
+                          <Text style={styles.solarDiagnosticHeader}>
+                            {insideCount} in-boundary samples, {uniqueCount} unique score{uniqueCount !== 1 ? 's' : ''}
+                          </Text>
+                          {uniqueCount <= 3 && insideCount > 5 && (
+                            <Text style={styles.solarDiagnosticNote}>
+                              Most sample points scored identically — typical of uniform farmland where every grid cell falls into the same discrete bins.
+                            </Text>
+                          )}
+                          {/* Per-component breakdown */}
+                          <View style={styles.solarComponentTable}>
+                            <View style={styles.solarComponentHeaderRow}>
+                              <Text style={[styles.solarComponentCell, styles.solarComponentCellLabel, { fontWeight: '600' }]}>Factor</Text>
+                              <Text style={[styles.solarComponentCell, { fontWeight: '600' }]}>Avg Score</Text>
+                              <Text style={[styles.solarComponentCell, { fontWeight: '600' }]}>Weight</Text>
+                            </View>
+                            {Object.entries(COMPONENT_LABELS).map(([key, { label, weight }]) => {
+                              const val = ca[key];
+                              return (
+                                <View key={key} style={styles.solarComponentRow}>
+                                  <Text style={[styles.solarComponentCell, styles.solarComponentCellLabel]}>{label}</Text>
+                                  <Text style={styles.solarComponentCell}>
+                                    {val != null ? `${(val * 100).toFixed(0)}` : '—'}
+                                  </Text>
+                                  <Text style={styles.solarComponentCell}>{weight}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                          {/* Raw data ranges */}
+                          {(rd.slopePercent || rd.populationDensity || rd.substationDistMiles) && (
+                            <View style={styles.solarRawRangesBox}>
+                              <Text style={[styles.solarDiagnosticHeader, { marginTop: 0 }]}>Raw Data Ranges</Text>
+                              {rd.slopePercent && (
+                                <Text style={styles.solarRawRangeRow}>
+                                  Slope: {rd.slopePercent.min.toFixed(2)}% – {rd.slopePercent.max.toFixed(2)}%
+                                </Text>
+                              )}
+                              {rd.substationDistMiles && (
+                                <Text style={styles.solarRawRangeRow}>
+                                  Nearest Substation: {rd.substationDistMiles.min.toFixed(1)} – {rd.substationDistMiles.max.toFixed(1)} mi
+                                </Text>
+                              )}
+                              {rd.populationDensity && (
+                                <Text style={styles.solarRawRangeRow}>
+                                  Population Density: {rd.populationDensity.min.toFixed(1)} – {rd.populationDensity.max.toFixed(1)} /km²
+                                </Text>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })()}
                     
                     {/* Land Cover Report - gated by feature flag */}
                     {expandedViewType.id === 'satellite' && SHOW_SITE_PREP_REPORT && (() => {
@@ -4177,6 +4247,66 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textLight,
   },
+  // --- Solar suitability component diagnostic styles ---
+  solarDiagnosticBox: {
+    backgroundColor: COLORS.backgroundDark,
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginTop: 8,
+    width: '100%',
+  },
+  solarDiagnosticHeader: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  solarDiagnosticNote: {
+    fontSize: 10,
+    color: COLORS.textLight,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  solarComponentTable: {
+    marginTop: 4,
+    gap: 2,
+  },
+  solarComponentHeaderRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingBottom: 3,
+    marginBottom: 2,
+  },
+  solarComponentRow: {
+    flexDirection: 'row',
+    paddingVertical: 2,
+  },
+  solarComponentCell: {
+    flex: 1,
+    fontSize: 10,
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  solarComponentCellLabel: {
+    flex: 2,
+    textAlign: 'left',
+  },
+  solarRawRangesBox: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  solarRawRangeRow: {
+    fontSize: 10,
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  // --- end solar diagnostic styles ---
   elevationInfo: {
     flexDirection: 'row',
     alignItems: 'center',

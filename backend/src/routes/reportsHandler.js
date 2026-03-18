@@ -342,12 +342,17 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
       .map((result) => result.overall)
       .filter((value) => Number.isFinite(value));
 
-    const insideScores = parserResult.results
+    // Collect full result objects for inside-boundary points (for component-level diagnostics)
+    const insideResults = parserResult.results
       .map((result, index) => {
         const coord = coordinatePairs[index];
         if (!coord || !Array.isArray(coord) || coord.length !== 2) return null;
-        return pointInPolygon(coord, ring) ? result.overall : null;
+        return pointInPolygon(coord, ring) ? result : null;
       })
+      .filter(Boolean);
+
+    const insideScores = insideResults
+      .map((r) => r.overall)
       .filter((value) => Number.isFinite(value));
 
     const medianSuitability = computeMedian(overallScores);
@@ -356,6 +361,32 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
     const insideMeanSuitability = insideScores.length
       ? insideScores.reduce((sum, value) => sum + value, 0) / insideScores.length
       : 0;
+
+    // --- Component-level diagnostics for inside-boundary points ---
+    const uniqueScores = new Set(insideScores.map((s) => Math.round(s * 10000)));
+    const uniqueScoreCount = uniqueScores.size;
+
+    // Per-component averages (0-1 scale, matching parser output)
+    const componentKeys = ['land_cover', 'slope', 'transmission', 'population'];
+    const componentAverages = {};
+    for (const key of componentKeys) {
+      const vals = insideResults.map((r) => r[key]).filter(Number.isFinite);
+      componentAverages[key] = vals.length
+        ? Math.round((vals.reduce((s, v) => s + v, 0) / vals.length) * 1000) / 1000
+        : null;
+    }
+
+    // Raw data ranges for inside-boundary points (helps explain WHY bins are uniform)
+    const rawSlopes = insideResults.map((r) => r.slope_value).filter(Number.isFinite);
+    const rawPops = insideResults.map((r) => r.population_density).filter(Number.isFinite);
+    const rawSubDist = insideResults.map((r) => r.sub_distance).filter(Number.isFinite);
+    const rawDataRanges = {
+      slopePercent: rawSlopes.length ? { min: Math.min(...rawSlopes), max: Math.max(...rawSlopes) } : null,
+      populationDensity: rawPops.length ? { min: Math.min(...rawPops), max: Math.max(...rawPops) } : null,
+      substationDistMiles: rawSubDist.length
+        ? { min: Math.round(Math.min(...rawSubDist) * 69 * 100) / 100, max: Math.round(Math.max(...rawSubDist) * 69 * 100) / 100 }
+        : null,
+    };
 
     return {
       success: true,
@@ -377,7 +408,11 @@ async function generateSolarReportFromGrid(coordinates, ring, gridPoints, coordi
         ...parserResult.summary,
         averageSuitability: Math.round(insideMeanSuitability * 100) / 100,
         medianSuitability: Math.round(medianSuitability * 100) / 100,
-        trimmedMeanSuitability: Math.round(trimmedMeanSuitability * 100) / 100
+        trimmedMeanSuitability: Math.round(trimmedMeanSuitability * 100) / 100,
+        insideSampleCount: insideScores.length,
+        uniqueScoreCount,
+        componentAverages,
+        rawDataRanges,
       },
       results: parserResult.results
     };
