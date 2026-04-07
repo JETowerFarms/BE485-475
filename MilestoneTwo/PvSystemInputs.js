@@ -11,7 +11,7 @@ import { COLORS } from '../styles/theme';
 
 const arrayTypeOptions = [
   { value: '0', label: 'Fixed Open Rack' },
-  { value: '1', label: 'Fixed Roof Mounted' },
+
   { value: '2', label: '1-Axis' },
   { value: '3', label: '1-Axis Backtracking' },
   { value: '4', label: '2-Axis' },

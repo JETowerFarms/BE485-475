@@ -17,7 +17,7 @@ const schema = Joi.object({
   }).required(),
   acres: Joi.number().positive().required(),
   crops: Joi.array().items(Joi.string().trim()).min(1).required(),
-  modelId: Joi.number().integer().required(),
+  modelId: Joi.number().integer().allow(null).optional(),
   pvwatts: Joi.object({
     lat: Joi.number().required(),
     lon: Joi.number().required(),
@@ -425,7 +425,7 @@ router.post('/', async (req, res) => {
 
     let modelRow = null;
     modelRow = await fetchModel(payload.modelId);
-    if (!modelRow) {
+    if (payload.modelId && !modelRow) {
       return res.status(404).json({ error: `Model ${payload.modelId} not found` });
     }
 

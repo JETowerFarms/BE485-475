@@ -163,7 +163,7 @@ if (-not $SkipEmulator) {
 
 Write-Section 'Verifying Services'
 Start-Sleep -Seconds 8
-$metroOk = Test-ServicePort -Label 'Metro' -Port 8081
+$metroOk = Test-ServicePort -Label 'Metro' -Port 8085
 $backendPortOk = Test-ServicePort -Label 'Backend' -Port $backendPortToUse
 $backendHealthOk = Test-HttpEndpoint -Label 'Backend Health' -Url "http://localhost:$backendPortToUse/health"
 

@@ -288,16 +288,14 @@ const ModelEditorScreen = ({ onBack }) => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.headerBg} />
 
-      {/* Back Button */}
-      <Pressable
-        onPress={onBack}
-        style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-      >
-        <Text style={styles.backButtonText}>←</Text>
-      </Pressable>
-
       {/* Header */}
       <View style={styles.header}>
+        <Pressable
+          onPress={onBack}
+          style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </Pressable>
         <Text style={styles.headerTitle}>Model Editor</Text>
       </View>
 
@@ -449,19 +447,16 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.headerBg,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: Platform.OS === 'ios' ? 50 : 45,
     paddingBottom: 10,
-    paddingHorizontal: 60,
-    alignItems: 'center',
+    paddingHorizontal: 16,
     backgroundColor: COLORS.headerBg,
     borderBottomWidth: 3,
     borderBottomColor: COLORS.border,
   },
   backButton: {
-    position: 'absolute',
-    top: 70,
-    left: 20,
-    zIndex: 100,
     width: 36,
     height: 36,
     borderRadius: 4,
@@ -492,10 +487,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   headerTitle: {
+    flex: 1,
     fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.headerText,
     textAlign: 'center',
+    marginRight: 36,
   },
   body: {
     flex: 1,
