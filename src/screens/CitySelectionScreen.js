@@ -739,13 +739,15 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
-      {/* Back Arrow Button - Top Left */}
-      <Pressable 
-        style={({ pressed }) => [styles.backArrowButton, pressed && styles.backArrowButtonPressed]}
-        onPress={onNavigateBack}
-      >
-        <Text style={styles.backArrowText}>←</Text>
-      </Pressable>
+      {/* Header Row */}
+      <View style={styles.headerRow}>
+        <Pressable 
+          style={({ pressed }) => [styles.backArrowButton, pressed && styles.backArrowButtonPressed]}
+          onPress={onNavigateBack}
+        >
+          <Text style={styles.backArrowText}>←</Text>
+        </Pressable>
+      </View>
       
       <View style={styles.content}>
         <View style={styles.mapOuter} onLayout={handleContainerLayout}>
@@ -755,7 +757,7 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
               style={({ pressed }) => [styles.searchButtonOverlay, pressed && styles.buttonPressed]}
               onPress={() => setSearchVisible(true)}
             >
-              <Text style={styles.searchButtonOverlayText}>Search your City</Text>
+              <Text style={styles.searchButtonOverlayText}>Search your Subdivision</Text>
             </Pressable>
             {displayScale > 1.05 && (
               <View style={styles.zoomIndicator}>
@@ -838,7 +840,7 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
           </View>
         </View>
         <Text style={styles.instruction}>
-          {selectedCity || `Select a city in ${county} County`}
+          {selectedCity || `Select a subdivision in ${county} County`}
         </Text>
         <Pressable
           style={({ pressed }) => [
@@ -856,10 +858,10 @@ const CitySelectionScreen = ({ county, mcdData: propMcdData, isLoadingMcdData: p
         <Modal visible={searchVisible} animationType="slide" transparent={true} onRequestClose={() => setSearchVisible(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Search Cities</Text>
+              <Text style={styles.modalTitle}>Search Subdivisions</Text>
               <TextInput
                 style={styles.searchInput}
-                placeholder="Type city name..."
+                placeholder="Type subdivision name..."
                 value={searchText}
                 onChangeText={setSearchText}
                 autoFocus
@@ -895,11 +897,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 50 : 10,
+    paddingBottom: 8,
+    paddingHorizontal: 16,
+  },
   backArrowButton: {
-    position: 'absolute',
-    top: 70,
-    left: 20,
-    zIndex: 100,
     width: 36,
     height: 36,
     borderRadius: 4,

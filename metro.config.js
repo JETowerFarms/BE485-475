@@ -19,6 +19,9 @@ function makeBlockListRegexSource(relativePath) {
 }
 
 const config = {
+  server: {
+    port: 8085,
+  },
   resolver: {
     assetExts: ['db', 'mp3', 'ttf', 'obj', 'png', 'jpg', 'geojson'],
     blockList: new RegExp(

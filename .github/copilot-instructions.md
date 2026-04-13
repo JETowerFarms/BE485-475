@@ -44,7 +44,7 @@ If CDNs/tiles are blocked, maps may fail to render; logs from the WebView map wi
 
 ### Common Ports
 
-- Metro bundler: `8081`
+- Metro bundler: `8085`
 - Backend API (expected by app in dev): `3001` (see `src/config/apiConfig.js`)
 
 ## Project Structure

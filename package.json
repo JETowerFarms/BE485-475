@@ -3,12 +3,14 @@
   "version": "1.2.0",
   "private": true,
   "scripts": {
-    "android": "react-native run-android",
-    "ios": "react-native run-ios",
+    "android": "react-native run-android --port 8085",
+    "ios": "react-native run-ios --port 8085",
     "lint": "eslint .",
-    "start": "react-native start",
+    "start": "react-native start --port 8085",
     "test": "jest",
-    "build-addon": "node-gyp rebuild"
+    "build-addon": "node-gyp rebuild",
+    "web": "webpack serve --mode development --config webpack.config.js",
+    "build:web": "webpack --mode production --config webpack.config.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -17,6 +19,7 @@
     "concaveman": "^2.0.0",
     "d3-contour": "^4.0.2",
     "leaflet": "^1.9.4",
+    "process": "^0.11.10",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-leaflet": "^5.0.0",
@@ -48,13 +51,21 @@
     "@types/react-test-renderer": "^19.1.0",
     "app-icon": "^0.13.2",
     "babel-jest": "^29.7.0",
+    "babel-loader": "^10.1.1",
+    "babel-plugin-react-native-web": "^0.21.2",
     "eslint": "^8.19.0",
+    "file-loader": "^6.2.0",
+    "html-webpack-plugin": "^5.6.6",
     "jest": "^29.6.3",
     "node-addon-api": "^8.1.0",
     "prettier": "2.8.8",
     "react-test-renderer": "19.1.1",
     "sharp": "^0.34.5",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "url-loader": "^4.1.1",
+    "webpack": "^5.105.4",
+    "webpack-cli": "^7.0.2",
+    "webpack-dev-server": "^5.2.3"
   },
   "engines": {
     "node": ">=20"

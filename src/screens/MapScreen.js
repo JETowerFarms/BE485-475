@@ -947,27 +947,27 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
       
-      {/* Back Button */}
-      <Pressable
-        style={({ pressed }) => [
-          styles.backButton,
-          pressed && styles.backButtonPressed,
-        ]}
-        onPress={onNavigateBack}
-        onPressIn={() => setBackPressed(true)}
-        onPressOut={() => setBackPressed(false)}
-      >
-        <Text style={styles.backButtonText}>←</Text>
-      </Pressable>
-
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {cityData ? cityData.name : 'Map View'}
-        </Text>
-        <Text style={styles.headerSubtitle}>
-          {cityData ? `${county} County` : 'Select a location'}
-        </Text>
+        <Pressable
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.backButtonPressed,
+          ]}
+          onPress={onNavigateBack}
+          onPressIn={() => setBackPressed(true)}
+          onPressOut={() => setBackPressed(false)}
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </Pressable>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {cityData ? cityData.name : 'Map View'}
+          </Text>
+          <Text style={styles.headerSubtitle}>
+            {cityData ? `${county} County` : 'Select a location'}
+          </Text>
+        </View>
       </View>
 
       {/* Instructions */}
@@ -1132,7 +1132,11 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
                       </View>
                       <Pressable
                         style={styles.deleteButton}
-                        onPress={() => handleDeleteFarm(item.id)}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDeleteFarm(item.id);
+                        }}
+                        onStartShouldSetResponder={() => true}
                       >
                         <Text style={styles.deleteButtonText}>Delete</Text>
                       </Pressable>
@@ -1332,10 +1336,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   backButton: {
-    position: 'absolute',
-    top: 70,
-    left: 20,
-    zIndex: 100,
     width: 36,
     height: 36,
     borderRadius: 4,
@@ -1366,10 +1366,16 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: Platform.OS === 'ios' ? 50 : 45,
     paddingBottom: 10,
-    paddingHorizontal: 60,
+    paddingHorizontal: 16,
+  },
+  headerCenter: {
+    flex: 1,
     alignItems: 'center',
+    marginRight: 36,
   },
   headerTitle: {
     fontSize: 20,
