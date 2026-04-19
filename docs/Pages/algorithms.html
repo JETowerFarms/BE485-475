@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Algorithms and Data Structures | Joshua Dixon</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 20px;
+      color: #222;
+      background: #f8f9fb;
+    }
+
+    header, section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    nav a {
+      margin-right: 16px;
+      text-decoration: none;
+      color: #0056b3;
+      font-weight: bold;
+    }
+
+    h1, h2 {
+      margin-top: 0;
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    .meta {
+      color: #555;
+      font-size: 0.95rem;
+    }
+
+    .button-link {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: #0056b3;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    .button-link:hover {
+      background: #003f84;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Algorithms and Data Structures</h1>
+    <p><strong>BE485-475 Repository Enhancement</strong></p>
+    <p class="meta">CS 499 Milestone Three</p>
+    <nav>
+      <a href="../index.html">Home</a>
+      <a href="#artifact">Artifact</a>
+      <a href="#justification">Justification</a>
+      <a href="#outcomes">Course Outcomes</a>
+      <a href="#reflection">Reflection</a>
+    </nav>
+  </header>
+
+  <section id="artifact">
+    <h2>Artifact Description</h2>
+    <p>
+      The artifact selected for this enhancement is the BE485-475 repository.
+      It is a full-stack application for solar farm suitability analysis.
+      It includes geospatial logic for polygon processing, grid generation,
+      and spatial queries. The artifact was created during prior academic
+      work at Michigan State University.
+    </p>
+    <p>
+      This artifact was selected because it contains multiple algorithms and
+      data structures related to geospatial computation. It includes
+      point-in-polygon checks, polygon area calculations, adjacency logic,
+      and coordinate transformations.
+    </p>
+    <p>
+      <a class="button-link" href="https://github.com/JETowerFarms/BE485-475">View Repository</a>
+    </p>
+  </section>
+
+  <section id="justification">
+    <h2>Justification and Enhancement</h2>
+    <p>
+      The artifact was improved by organizing and consolidating these algorithms.
+      Multiple implementations of point-in-polygon and area calculations were
+      reduced into shared logic. A geometry utility layer was introduced to
+      centralize these operations. Repeated computations were reduced by caching
+      results such as polygon area and geometry structures. Data flow for polygon
+      processing was improved to remove redundant steps.
+    </p>
+    <p>
+      Algorithm efficiency was improved. Expensive operations such as repeated
+      object creation inside loops and duplicate point-in-polygon checks were
+      reduced. Adjacency computation and hit-testing logic were identified as
+      inefficient and improved through better structure and reduced repeated
+      work. Coordinate transformation logic was made more consistent across
+      the system.
+    </p>
+
+    <h2>Enhancement Focus</h2>
+    <ul>
+      <li>Geospatial computation</li>
+      <li>Shared geometry utilities</li>
+      <li>Point-in-polygon consolidation</li>
+      <li>Polygon area calculation reuse</li>
+      <li>Caching of repeated geometry results</li>
+      <li>Improved data flow for polygon processing</li>
+      <li>Reduced duplicate computations</li>
+      <li>Improved coordinate transformation consistency</li>
+    </ul>
+  </section>
+
+  <section id="outcomes">
+    <h2>Course Outcome Alignment</h2>
+    <p>
+      This work demonstrates the ability to design and evaluate computing
+      solutions using algorithmic principles. It shows improvement of
+      efficiency and structure in an existing system.
+    </p>
+    <p>
+      It also demonstrates the use of appropriate data structures for spatial
+      data and graph relationships. The planned outcomes were met, and the
+      artifact shows improved algorithm performance, organization, and
+      maintainability.
+    </p>
+  </section>
+
+  <section id="reflection">
+    <h2>Reflection on the Enhancement Process</h2>
+    <p>
+      The process focused on identifying repeated and inefficient algorithms.
+      One result was consolidating multiple implementations into shared logic.
+      This improved consistency and reduced duplication.
+    </p>
+    <p>
+      Another result was improving performance by reducing repeated
+      computations. Caching and reuse were applied where possible.
+    </p>
+    <p>
+      A challenge was managing consistency across frontend and backend code.
+      The same logic existed in multiple locations and required coordinated
+      updates.
+    </p>
+    <p>
+      The final result is a system with more organized algorithms, improved
+      efficiency, and clearer data flow.
+    </p>
+  </section>
+</body>
+</html>
