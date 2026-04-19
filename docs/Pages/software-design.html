@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Software Design and Engineering | Joshua Dixon</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 20px;
+      color: #222;
+      background: #f8f9fb;
+    }
+
+    header, section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    nav a {
+      margin-right: 16px;
+      text-decoration: none;
+      color: #0056b3;
+      font-weight: bold;
+    }
+
+    h1, h2 {
+      margin-top: 0;
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    .meta {
+      color: #555;
+      font-size: 0.95rem;
+    }
+
+    .button-link {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: #0056b3;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    .button-link:hover {
+      background: #003f84;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Software Design and Engineering</h1>
+    <p><strong>BE485-475 Repository Enhancement</strong></p>
+    <p class="meta">CS 499 Milestone Two</p>
+    <nav>
+      <a href="../index.html">Home</a>
+      <a href="#artifact">Artifact</a>
+      <a href="#justification">Justification</a>
+      <a href="#outcomes">Course Outcomes</a>
+      <a href="#reflection">Reflection</a>
+    </nav>
+  </header>
+
+  <section id="artifact">
+    <h2>Artifact Description</h2>
+    <p>
+      The artifact selected for this enhancement is the BE485-475 repository.
+      It comes from earlier academic work at Michigan State University and serves
+      as a Michigan solar farm suitability and optimization tool. The project
+      uses a React Native frontend with a Node and Express backend.
+    </p>
+    <p>
+      This artifact was selected because it shows real full-stack software
+      development and includes a clear software design problem that could be
+      improved through refactoring and stronger separation of concerns.
+    </p>
+    <p>
+      <a class="button-link" href="https://github.com/JETowerFarms/BE485-475">View Repository</a>
+    </p>
+  </section>
+
+  <section id="justification">
+    <h2>Justification and Enhancement</h2>
+    <p>
+      In Module One, FarmDescriptionScreen.js was identified as a very large file
+      that combined too many responsibilities in one place. The enhancement focused
+      on improving the structure and maintainability of the application by breaking
+      the screen into smaller parts and moving repeated logic into shared modules.
+    </p>
+    <p>
+      The artifact showcases software development skills through the screen flow,
+      shared utilities, backend routes and services, testing setup, and deployment
+      support. The enhancement improved the artifact by moving the code toward a
+      cleaner separation of concerns.
+    </p>
+
+    <h2>Enhancement Focus</h2>
+    <ul>
+      <li>Modular design</li>
+      <li>Refactoring</li>
+      <li>Component-based architecture</li>
+      <li>Maintainability</li>
+      <li>Testing readiness</li>
+      <li>Cleaner separation of concerns</li>
+    </ul>
+  </section>
+
+  <section id="outcomes">
+    <h2>Course Outcome Alignment</h2>
+    <p>
+      This enhancement supports the outcome related to designing and evaluating
+      computing solutions because it improves the structure of an existing system
+      instead of only adding features.
+    </p>
+    <p>
+      It also supports the outcome related to using well-founded techniques,
+      skills, and tools because the project combines React Native, Node, Express,
+      testing files, Docker support, and deployment infrastructure.
+    </p>
+    <p>
+      It also supports the security outcome in a partial way because the design
+      now relies more on shared logic and backend-generated data.
+    </p>
+  </section>
+
+  <section id="reflection">
+    <h2>Reflection on the Enhancement Process</h2>
+    <p>
+      This enhancement reinforced that software design problems are often caused
+      by code that works but carries too many responsibilities in one place.
+    </p>
+    <p>
+      There were some features that were not functional until after this refactor.
+      The exact source of the bug was not fully identified, but the work showed
+      that clean code supports functional code.
+    </p>
+    <p>
+      The final result is a more maintainable structure that better supports
+      future testing, extension, and reuse.
+    </p>
+  </section>
+</body>
+</html>
