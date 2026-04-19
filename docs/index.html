@@ -14,24 +14,44 @@
       color: #222;
       background: #f8f9fb;
     }
+
     header, section {
       background: white;
       padding: 20px;
       margin-bottom: 20px;
       border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
+
     nav a {
       margin-right: 16px;
       text-decoration: none;
       color: #0056b3;
       font-weight: bold;
     }
+
     h1, h2 {
       margin-top: 0;
     }
+
     ul {
       padding-left: 20px;
+    }
+
+    .button-link {
+      display: inline-block;
+      margin-top: 10px;
+      margin-right: 10px;
+      padding: 10px 14px;
+      background: #0056b3;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    .button-link:hover {
+      background: #003f84;
     }
   </style>
 </head>
@@ -40,47 +60,93 @@
     <h1>Joshua Dixon</h1>
     <p><strong>CS 499 ePortfolio</strong></p>
     <p>
-      This ePortfolio presents original and enhanced artifacts that demonstrate
-      growth in software design and engineering, algorithms and data structures,
-      and databases.
+      This ePortfolio presents the BE485-475 repository through software design
+      and engineering, algorithms and data structures, and databases.
     </p>
     <nav>
-      <a href="#about">About</a>
-      <a href="#artifacts">Artifacts</a>
-      <a href="#code-review">Code Review</a>
+      <a href="#self-assessment">Professional Self-Assessment</a>
+      <a href="#artifact-overview">Artifact Overview</a>
       <a href="#narratives">Narratives</a>
+      <a href="#files">Files</a>
     </nav>
   </header>
 
-  <section id="about">
-    <h2>About This Portfolio</h2>
+  <section id="self-assessment">
+    <h2>Professional Self-Assessment</h2>
     <p>
-      This portfolio documents my technical growth in computer science through
-      artifact enhancement, reflection, and professional presentation.
+      My CS 499 ePortfolio documents growth in technical and professional skills
+      through the BE485-475 repository, a Michigan solar farm suitability and
+      optimization tool built with a React Native frontend, a Node and Express
+      backend, and PostgreSQL with PostGIS.
+    </p>
+    <p>
+      The portfolio focuses on full-stack software development, problem solving,
+      database design, and applied analysis. It uses one artifact across the
+      three required categories: software design and engineering, algorithms and
+      data structures, and databases.
+    </p>
+    <p>
+      The software design enhancement improved structure and maintainability by
+      breaking a large screen file into smaller parts and moving repeated logic
+      into shared modules. The algorithms enhancement consolidated geospatial
+      logic, reduced repeated computations, and improved consistency across the
+      system. The database enhancement reduced duplication between schema and
+      migration files, improved query structure and validation, and removed
+      unsafe query patterns and hardcoded credentials.
+    </p>
+    <p>
+      Together, these materials present one artifact through software design,
+      algorithms, database, and security work in a single GitHub Pages ePortfolio.
     </p>
   </section>
 
-  <section id="artifacts">
-    <h2>Artifact Categories</h2>
-    <ul>
-      <li><strong>Software Design and Engineering:</strong> BE485-475 enhancement plan</li>
-      <li><strong>Algorithms and Data Structures:</strong> Geospatial logic enhancement plan</li>
-      <li><strong>Databases:</strong> PostGIS and data-access enhancement plan</li>
-    </ul>
+  <section id="artifact-overview">
+    <h2>Artifact Overview</h2>
     <p>
-      Repository link:
-      <a href="https://github.com/JETowerFarms/BE485-475">BE485-475</a>
+      The selected artifact is the BE485-475 repository. It comes from prior
+      academic work at Michigan State University and serves as a Michigan solar
+      farm suitability and optimization tool.
     </p>
-  </section>
-
-  <section id="code-review">
-    <h2>Code Review</h2>
-    <p>Code review link will be added here.</p>
+    <p>
+      This artifact was used across all three enhancement categories. The
+      software design and engineering work focused on modularity and
+      maintainability. The algorithms and data structures work focused on
+      geospatial efficiency and shared logic. The database work focused on
+      schema quality, validation, and reliable data access.
+    </p>
+    <p>
+      <a class="button-link" href="https://github.com/JETowerFarms/BE485-475">View Repository</a>
+    </p>
   </section>
 
   <section id="narratives">
     <h2>Narratives</h2>
-    <p>Milestone narratives and final self-assessment will be added here.</p>
+    <ul>
+      <li>
+        <strong>Software Design and Engineering:</strong>
+        <a href="./Pages/software-design.html">HTML Page</a> |
+        <a href="./Pages/CS%20499%20Milestone%20Two.docx">Word Document</a>
+      </li>
+      <li>
+        <strong>Algorithms and Data Structures:</strong>
+        <a href="./Pages/algorithms.html">HTML Page</a> |
+        <a href="./Pages/Module%20Three.docx">Word Document</a>
+      </li>
+      <li>
+        <strong>Databases:</strong>
+        <a href="./Pages/databases.html">HTML Page</a> |
+        <a href="./Pages/Module%20Four.docx">Word Document</a>
+      </li>
+    </ul>
+  </section>
+
+  <section id="files">
+    <h2>Files</h2>
+    <ul>
+      <li><a href="./Files/MilestoneTwo/">Milestone Two Files</a></li>
+      <li><a href="./Files/MilestoneThree/">Milestone Three Files</a></li>
+      <li><a href="./Files/MilestoneFour/">Milestone Four Files</a></li>
+    </ul>
   </section>
 </body>
 </html>
