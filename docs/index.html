@@ -23,19 +23,33 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
 
-    nav a {
-      margin-right: 16px;
-      text-decoration: none;
-      color: #0056b3;
-      font-weight: bold;
-    }
-
-    h1, h2 {
+    h1, h2, h3 {
       margin-top: 0;
     }
 
     ul {
       padding-left: 20px;
+    }
+
+    .nav-group {
+      margin-top: 14px;
+      margin-bottom: 10px;
+    }
+
+    .nav-label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #444;
+    }
+
+    .nav-group a {
+      display: inline-block;
+      margin-right: 16px;
+      margin-bottom: 8px;
+      text-decoration: none;
+      color: #0056b3;
+      font-weight: bold;
     }
 
     .button-link {
@@ -50,8 +64,10 @@
       font-weight: bold;
     }
 
-    .button-link:hover {
-      background: #003f84;
+    .button-link:hover,
+    .nav-group a:hover {
+      background: transparent;
+      color: #003f84;
     }
   </style>
 </head>
@@ -63,11 +79,23 @@
       This ePortfolio presents the BE485-475 repository through software design
       and engineering, algorithms and data structures, and databases.
     </p>
+
     <nav>
-      <a href="#self-assessment">Professional Self-Assessment</a>
-      <a href="#artifact-overview">Artifact Overview</a>
-      <a href="#narratives">Narratives</a>
-      <a href="#files">Files</a>
+      <div class="nav-group">
+        <span class="nav-label">Pages</span>
+        <a href="./Pages/software-design.html">Software Design</a>
+        <a href="./Pages/algorithms.html">Algorithms</a>
+        <a href="./Pages/databases.html">Databases</a>
+        <a href="https://github.com/JETowerFarms/BE485-475">Repository</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-label">Sections</span>
+        <a href="#self-assessment">Professional Self-Assessment</a>
+        <a href="#artifact-overview">Artifact Overview</a>
+        <a href="#narratives">Narratives</a>
+        <a href="#files">Files</a>
+      </div>
     </nav>
   </header>
 
@@ -143,9 +171,9 @@
   <section id="files">
     <h2>Files</h2>
     <ul>
-      <li><a href="./Files/MilestoneTwo/">Milestone Two Files</a></li>
-      <li><a href="./Files/MilestoneThree/">Milestone Three Files</a></li>
-      <li><a href="./Files/MilestoneFour/">Milestone Four Files</a></li>
+      <li><a href="./Files/MilestoneTwo.zip">Milestone Two ZIP</a></li>
+      <li><a href="./Files/MilestoneThree.zip">Milestone Three ZIP</a></li>
+      <li><a href="./Files/MilestoneFour.zip">Milestone Four ZIP</a></li>
     </ul>
   </section>
 </body>
