@@ -23,14 +23,7 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
 
-    nav a {
-      margin-right: 16px;
-      text-decoration: none;
-      color: #0056b3;
-      font-weight: bold;
-    }
-
-    h1, h2 {
+    h1, h2, h3 {
       margin-top: 0;
     }
 
@@ -41,6 +34,27 @@
     .meta {
       color: #555;
       font-size: 0.95rem;
+    }
+
+    .nav-group {
+      margin-top: 14px;
+      margin-bottom: 10px;
+    }
+
+    .nav-label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 8px;
+      color: #444;
+    }
+
+    .nav-group a {
+      display: inline-block;
+      margin-right: 16px;
+      margin-bottom: 8px;
+      text-decoration: none;
+      color: #0056b3;
+      font-weight: bold;
     }
 
     .button-link {
@@ -55,8 +69,10 @@
       font-weight: bold;
     }
 
-    .button-link:hover {
-      background: #003f84;
+    .button-link:hover,
+    .nav-group a:hover {
+      background: transparent;
+      color: #003f84;
     }
   </style>
 </head>
@@ -65,15 +81,24 @@
     <h1>Databases</h1>
     <p><strong>BE485-475 Repository Enhancement</strong></p>
     <p class="meta">CS 499 Milestone Four</p>
+
     <nav>
-      <a href="../index.html">Home</a>
-      <a href="./software-design.html">Software Design</a>
-      <a href="./algorithms.html">Algorithms</a>
-      <a href="#artifact">Artifact</a>
-      <a href="#justification">Justification</a>
-      <a href="#outcomes">Course Outcomes</a>
-      <a href="#reflection">Reflection</a>
-      <a href="#files">Files</a>
+      <div class="nav-group">
+        <span class="nav-label">Pages</span>
+        <a href="../index.html">Home</a>
+        <a href="./software-design.html">Software Design</a>
+        <a href="./algorithms.html">Algorithms</a>
+        <a href="https://github.com/JETowerFarms/BE485-475">Repository</a>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-label">Sections</span>
+        <a href="#artifact">Artifact</a>
+        <a href="#justification">Justification</a>
+        <a href="#outcomes">Course Outcomes</a>
+        <a href="#reflection">Reflection</a>
+        <a href="#files">Files</a>
+      </div>
     </nav>
   </header>
 
@@ -159,7 +184,7 @@
   <section id="files">
     <h2>Related Files</h2>
     <p>
-      <a class="button-link" href="../Files/MilestoneFour/">Open Milestone Four Files</a>
+      <a class="button-link" href="../Files/MilestoneFour.zip">Download Milestone Four ZIP</a>
     </p>
   </section>
 </body>
