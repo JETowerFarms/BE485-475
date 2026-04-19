@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Databases | Joshua Dixon</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 20px;
+      color: #222;
+      background: #f8f9fb;
+    }
+
+    header, section {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    nav a {
+      margin-right: 16px;
+      text-decoration: none;
+      color: #0056b3;
+      font-weight: bold;
+    }
+
+    h1, h2 {
+      margin-top: 0;
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    .meta {
+      color: #555;
+      font-size: 0.95rem;
+    }
+
+    .button-link {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: #0056b3;
+      color: white;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+
+    .button-link:hover {
+      background: #003f84;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Databases</h1>
+    <p><strong>BE485-475 Repository Enhancement</strong></p>
+    <p class="meta">CS 499 Milestone Four</p>
+    <nav>
+      <a href="../index.html">Home</a>
+      <a href="#artifact">Artifact</a>
+      <a href="#justification">Justification</a>
+      <a href="#outcomes">Course Outcomes</a>
+      <a href="#reflection">Reflection</a>
+    </nav>
+  </header>
+
+  <section id="artifact">
+    <h2>Artifact Description</h2>
+    <p>
+      The artifact selected for this enhancement is the BE485-475 repository.
+      It is a full-stack application for solar farm suitability analysis.
+      It uses PostgreSQL with PostGIS and a Node/Express backend. The database
+      stores farms, analysis results, raster data, incentives, and models.
+      The artifact was created during prior academic work at Michigan State University.
+    </p>
+    <p>
+      This artifact was selected because it contains a database system with
+      geospatial data and backend integration. It shows database design,
+      query use, and data management.
+    </p>
+    <p>
+      <a class="button-link" href="https://github.com/JETowerFarms/BE485-475">View Repository</a>
+    </p>
+  </section>
+
+  <section id="justification">
+    <h2>Justification and Enhancement</h2>
+    <p>
+      The database was improved in several areas. The schema was reviewed and
+      duplication between schema and migration files was reduced. Query structure
+      was improved by removing inefficient patterns and reducing unnecessary
+      data retrieval. Validation before writes was strengthened.
+    </p>
+    <p>
+      The setup and migration process was improved to be consistent and repeatable.
+      Storage and retrieval of farm data and cached analysis results were improved.
+    </p>
+
+    <h2>Enhancement Focus</h2>
+    <ul>
+      <li>Schema review and cleanup</li>
+      <li>Reduced duplication between schema and migration files</li>
+      <li>Improved query structure</li>
+      <li>Reduced unnecessary data retrieval</li>
+      <li>Stronger validation before writes</li>
+      <li>Consistent and repeatable setup and migration process</li>
+      <li>Improved storage and retrieval of farm data</li>
+      <li>Improved handling of cached analysis results</li>
+      <li>Removal of unsafe query patterns</li>
+      <li>Removal of hardcoded credentials</li>
+    </ul>
+  </section>
+
+  <section id="outcomes">
+    <h2>Course Outcome Alignment</h2>
+    <p>
+      This work demonstrates the ability to design and evaluate computing
+      solutions using database practices. It shows analysis of an existing
+      system and implementation of improvements. It uses PostgreSQL and PostGIS.
+    </p>
+    <p>
+      Security was improved by removing unsafe query patterns and hardcoded
+      credentials. The planned outcomes were met, and no changes to the plan
+      were required.
+    </p>
+  </section>
+
+  <section id="reflection">
+    <h2>Reflection on the Enhancement Process</h2>
+    <p>
+      The process focused on improving an existing database system. Schema,
+      migrations, and runtime logic were separated. Query design was improved.
+      Spatial queries were made more efficient.
+    </p>
+    <p>
+      A challenge was keeping schema and queries consistent across the system.
+      Changes required updates in multiple locations.
+    </p>
+    <p>
+      The final result is a database system that is more reliable,
+      maintainable, and efficient.
+    </p>
+  </section>
+</body>
+</html>
