@@ -11,7 +11,6 @@ import { COLORS } from '../styles/theme';
 
 const arrayTypeOptions = [
   { value: '0', label: 'Fixed Open Rack' },
-  { value: '1', label: 'Fixed Roof Mounted' },
   { value: '2', label: '1-Axis' },
   { value: '3', label: '1-Axis Backtracking' },
   { value: '4', label: '2-Axis' },
@@ -211,6 +210,16 @@ const PvSystemInputs = ({
         placeholderTextColor={COLORS.placeholder}
         keyboardType="numeric"
       />
+
+      <Pressable
+        style={styles.checkboxRow}
+        onPress={() => onFieldChange('bifacial', !pvDraftInputs.bifacial)}
+      >
+        <View style={[styles.checkbox, pvDraftInputs.bifacial && styles.checkboxChecked]}>
+          {pvDraftInputs.bifacial ? <Text style={styles.bifacialCheckmark}>✓</Text> : null}
+        </View>
+        <Text style={styles.subLabel}>Bifacial modules</Text>
+      </Pressable>
     </View>
   );
 };
@@ -287,6 +296,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.inputBg,
   },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 10,
+  },
+  checkboxChecked: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  bifacialCheckmark: { fontSize: 14, fontWeight: 'bold', color: '#FFFFFF' },
   checkmark: { fontSize: 14, fontWeight: 'bold', color: COLORS.accent },
 });
 

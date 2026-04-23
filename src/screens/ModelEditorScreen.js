@@ -9,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   StatusBar,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { buildApiUrl, apiFetch } from '../config/apiConfig';
@@ -291,7 +292,7 @@ const ModelEditorScreen = ({ onBack }) => {
       {/* Header */}
       <View style={styles.header}>
         <Pressable
-          onPress={onBack}
+          onPress={() => onBack(selectedModelId)}
           style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
         >
           <Text style={styles.backButtonText}>←</Text>
@@ -377,6 +378,12 @@ const ModelEditorScreen = ({ onBack }) => {
               <Text style={styles.deleteButtonText}>{deleting ? 'Deleting…' : 'Delete model'}</Text>
             </Pressable>
           )}
+          <Pressable
+            style={styles.linkButton}
+            onPress={() => Linking.openURL('https://atb.nrel.gov/electricity/2024/utility-scale_pv')}
+          >
+            <Text style={styles.linkButtonText}>Module cost reference ↗</Text>
+          </Pressable>
         </View>
 
         <View style={styles.formGrid}>
@@ -410,32 +417,7 @@ const ModelEditorScreen = ({ onBack }) => {
           </View>
         )}
 
-        <Text style={styles.label}>Model JSON</Text>
-        <TextInput
-          multiline
-          style={styles.codeInput}
-          value={jsonText}
-          editable={false}
-          selectTextOnFocus
-          placeholder="Model JSON will appear here"
-          placeholderTextColor={COLORS.textLight}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-
-        <View style={styles.equationsCard}>
-          <Text style={styles.label}>Default equations preview</Text>
-          {Array.isArray(template?.equations) && template.equations.length ? (
-            template.equations.map((eq) => (
-              <View key={eq.title} style={styles.eqRow}>
-                <Text style={styles.eqTitle}>{eq.title}</Text>
-                <Text style={styles.eqText}>{eq.eq}</Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.textLight}>No equations available</Text>
-          )}
-        </View>
+        {/* Model JSON and equations preview hidden for end users */}
       </ScrollView>
     </SafeAreaView>
   );
@@ -554,6 +536,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  linkButton: {
+    backgroundColor: COLORS.inputBg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  linkButtonText: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   error: {
     color: COLORS.danger,
     fontSize: 13,
@@ -608,6 +603,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textLight,
     marginTop: 2,
+    fontFamily: Platform.OS === 'web' ? 'monospace' : 'Courier New',
+    lineHeight: 18,
   },
   formGrid: {
     flexDirection: 'row',

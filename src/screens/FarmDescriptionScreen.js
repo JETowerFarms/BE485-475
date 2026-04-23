@@ -27,9 +27,9 @@ import {
   validateCoordinates,
 } from '../utils/geometryUtils';
 
-import useCropOptions from '../hooks/useCropOptions';
-import useIncentiveCatalog from '../hooks/useIncentiveCatalog';
-import useFarmAnalysis from '../hooks/useFarmAnalysis';
+import { useCropOptions } from '../hooks/useCropOptions';
+import { useIncentiveCatalog } from '../hooks/useIncentiveCatalog';
+import { useFarmAnalysis } from '../hooks/useFarmAnalysis';
 
 import FarmDrawer from '../components/FarmDrawer';
 import ExpandedTileModal from '../components/ExpandedTileModal';
@@ -65,7 +65,8 @@ const emptyPvInputs = {
   azimuth: '180',
   arrayType: '0',
   moduleType: '0',
-  losses: '16',
+  losses: '10',
+  bifacial: false,
 };
 
 // Slim orchestrator — UI logic lives in /components and /hooks.
@@ -77,6 +78,8 @@ const FarmDescriptionScreen = ({
   onNavigateNext,
   onFarmsUpdate,
   onOpenModelEditor,
+  selectedModelId: selectedModelIdProp,
+  onSelectedModelIdChange,
 }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerAnim = useRef(new Animated.Value(0)).current;
@@ -104,8 +107,15 @@ const FarmDescriptionScreen = ({
   const [pvInputsByFarmId, setPvInputsByFarmId] = useState({});
   const [pvDraftByFarmId, setPvDraftByFarmId] = useState({});
 
-  const [selectedModelId, setSelectedModelId] = useState(null);
   const [selectedModel, setSelectedModel] = useState(null);
+
+  const selectedModelId = selectedModelIdProp ?? null;
+
+  const setSelectedModelId = useCallback((nextId) => {
+    if (onSelectedModelIdChange) {
+      onSelectedModelIdChange(nextId ?? null);
+    }
+  }, [onSelectedModelIdChange]);
 
   const [selectedIncentiveIds, setSelectedIncentiveIds] = useState([]);
   const [incentiveParams, setIncentiveParams] = useState({
@@ -161,6 +171,19 @@ const FarmDescriptionScreen = ({
       setCurrentIndex(builtFarms.length - 1);
     }
   }, [builtFarms.length]);
+
+  // On-demand fetch: whenever the visible farm lacks backendAnalysis, request it
+  // from the backend immediately instead of waiting for the background poll.
+  const fetchedAnalysisIdsRef = useRef(new Set());
+  useEffect(() => {
+    const currentFarm = builtFarms[currentIndex];
+    if (!currentFarm?.id) return;
+    if (currentFarm.backendAnalysis) return;
+    if (currentFarm.analysisStatus === 'running') return;
+    if (fetchedAnalysisIdsRef.current.has(currentFarm.id)) return;
+    fetchedAnalysisIdsRef.current.add(currentFarm.id);
+    refreshFarmAnalysis(currentFarm);
+  }, [builtFarms, currentIndex, refreshFarmAnalysis]);
 
   useEffect(() => {
     if (selectedFarmIds.length === 0) {
@@ -353,8 +376,14 @@ const FarmDescriptionScreen = ({
           ? snap.selectedFarmIds[0]
           : null),
     );
-    setSelectedModelId(snap?.selectedModelId || null);
-  }, []);
+    const rawModelId = snap?.selectedModelId;
+    const normalizedModelId =
+      rawModelId && typeof rawModelId === 'object'
+        ? rawModelId?.id ?? null
+        : rawModelId || null;
+    setSelectedModelId(normalizedModelId);
+    setSelectedModel(null);
+  }, [setSelectedModelId]);
 
   const toggleDrawer = useCallback(() => {
     const toValue = drawerOpen ? 0 : 1;
@@ -504,8 +533,9 @@ const FarmDescriptionScreen = ({
             tilt: parsedTilt,
             azimuth: parsedAzimuth,
             losses: parsedLosses,
+            bifacial: pv.bifacial ? 1 : 0,
           },
-          modelId: selectedModel?.id || null,
+          modelId: selectedModelId ?? selectedModel?.id ?? null,
           modelFlags: {
             ...(selectedIncentiveIds.length > 0
               ? { eligible_incentives: selectedIncentiveIds }
@@ -545,6 +575,8 @@ const FarmDescriptionScreen = ({
             ...f,
             linearOptimization: data.optimization || null,
             linearOptimizationLogs: data.logs || null,
+            linearOptimizationModelId: data.modelId ?? null,
+            linearOptimizationModelName: data.modelName || null,
           };
         });
       }
@@ -591,7 +623,12 @@ const FarmDescriptionScreen = ({
             onPress={() => setModelPickerVisible(true)}
           >
             <Text style={styles.rotationSaveButtonText}>
-              {`Choose model: ${selectedModel?.name || 'Default'}`}
+              {`Choose model: ${
+                selectedModel?.name ||
+                (selectedModelId != null && typeof selectedModelId === 'number'
+                  ? `Model #${selectedModelId}`
+                  : 'Default')
+              }`}
             </Text>
           </Pressable>
 
@@ -831,7 +868,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     backgroundColor: COLORS.backBtnBg,
-    borderRadius: 20,
+    borderRadius: 4,
     borderWidth: 2,
     borderColor: COLORS.backBtnBorder,
     justifyContent: 'center',

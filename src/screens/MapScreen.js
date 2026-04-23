@@ -397,6 +397,86 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
     loadFarmsFromBackend();
   }, []); // Empty dependency array - only run once on mount
 
+  // Poll GET /api/reports/status?ids=... in ONE batch request every 15s for farms that don't have analysis yet.
+  // When a farm flips to 'ready', fetch its full payload with a single follow-up request.
+  useEffect(() => {
+    const POLL_INTERVAL_MS = 15_000;
+
+    const pollPendingFarms = async () => {
+      const pending = (farmsRef.current || []).filter(
+        (f) => f?.id && !f?.backendAnalysis,
+      );
+      if (pending.length === 0) return;
+
+      const ids = pending.map((f) => f.id).join(',');
+      let results = {};
+      try {
+        const res = await apiFetch(buildApiUrl(`/reports/status?ids=${encodeURIComponent(ids)}`));
+        if (!res.ok) return;
+        const json = await res.json();
+        results = json?.results || {};
+      } catch (err) {
+        return; // non-fatal, retry next tick
+      }
+
+      // Collect which farms are ready vs running; apply running-status updates in a single setFarms.
+      const readyFarmIds = [];
+      let runningChanged = false;
+      const withRunningUpdated = (farmsRef.current || []).map((f) => {
+        const status = results[f.id]?.status;
+        if (status === 'ready') {
+          readyFarmIds.push(f.id);
+          return f; // we'll patch after the detail fetch
+        }
+        if (status === 'running' && f.analysisStatus !== 'running') {
+          runningChanged = true;
+          return { ...f, analysisStatus: 'running' };
+        }
+        return f;
+      });
+      if (runningChanged) {
+        farmsRef.current = withRunningUpdated;
+        if (isMountedRef.current) setFarms(withRunningUpdated);
+      }
+
+      // Fetch full payload only for farms that just became ready (one request per ready farm).
+      for (const farmId of readyFarmIds) {
+        try {
+          const res = await apiFetch(buildApiUrl(`/reports/farm/${farmId}`));
+          if (!res.ok) continue;
+          const json = await res.json();
+          if (json.status !== 'ready' || !json.data) continue;
+          const analysis = json.data;
+          const nextFarms = (farmsRef.current || []).map((f) => {
+            if (f.id !== farmId) return f;
+            return {
+              ...f,
+              properties: {
+                ...f.properties,
+                avgSuitability: analysis?.solarSuitability?.summary?.averageSuitability,
+              },
+              backendAnalysis: analysis,
+              analysisStatus: 'completed',
+            };
+          });
+          farmsRef.current = nextFarms;
+          if (isMountedRef.current) setFarms(nextFarms);
+          if (onFarmsUpdate) onFarmsUpdate(nextFarms);
+        } catch (_) {
+          // non-fatal
+        }
+      }
+    };
+
+    const timer = setInterval(pollPendingFarms, POLL_INTERVAL_MS);
+    // Run once shortly after mount so cached analysis appears fast
+    const initialTimer = setTimeout(pollPendingFarms, 1000);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(initialTimer);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handlePinAdd = (newPin) => {
     setPins(currentPins => [...currentPins, {
       ...newPin,
@@ -528,94 +608,7 @@ const MapScreen = ({ county, city, mcdData: propMcdData, isLoadingMcdData: propI
           setPins([]);
           console.log('Farm created:', farm.id, farm.properties.name);
 
-          const updateFarmAnalysisStatus = (farmId, status) => {
-            setFarms(currentFarms => currentFarms.map(f => {
-              if (f.id !== farmId) return f;
-              return { ...f, analysisStatus: status };
-            }));
-          };
-
-          // Kick off analysis by farm ID (non-blocking)
-          const analyzeFarmInBackground = async (farmToAnalyze) => {
-            const farmId = farmToAnalyze?.id;
-            if (!farmId) return;
-            const analysisCounty = farmToAnalyze?.properties?.county;
-            const analysisCity = farmToAnalyze?.properties?.city;
-            if (!analysisCounty || !analysisCity || analysisCounty.trim() === '' || analysisCity.trim() === '') {
-              console.warn('Analysis skipped: county or city not available for farm', farmId);
-              updateFarmAnalysisStatus(farmId, 'error');
-              return;
-            }
-            console.log('Starting background analysis for farm', farmId);
-            updateFarmAnalysisStatus(farmId, 'running');
-            try {
-              const rawCoordinates = farmToAnalyze?.geometry?.coordinates?.[0] || [];
-              const coordinates = rawCoordinates.length > 1 &&
-                rawCoordinates[0][0] === rawCoordinates[rawCoordinates.length - 1][0] &&
-                rawCoordinates[0][1] === rawCoordinates[rawCoordinates.length - 1][1]
-                ? rawCoordinates.slice(0, -1)
-                : rawCoordinates;
-
-              if (!Array.isArray(coordinates) || coordinates.length < 3) {
-                throw new Error('Invalid farm geometry: not enough points to analyze');
-              }
-
-              const payload = { coordinates, userId: 'default-user' };
-              console.log('Analyze request payload:', JSON.stringify(payload, null, 2));
-
-              const response = await apiFetch(buildApiUrl('/reports/analyze'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              });
-
-              if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Backend API error (${response.status}): ${errorText}`);
-              }
-
-              const responseText = await response.text();
-              console.log('Analyze response payload:', responseText);
-              let backendAnalysis;
-              try {
-                backendAnalysis = JSON.parse(responseText);
-              } catch (parseError) {
-                throw new Error(`Invalid JSON response: ${parseError.message}`);
-              }
-
-              const solarResults = backendAnalysis?.solarSuitability?.results;
-              if (Array.isArray(solarResults) && solarResults.length > 0) {
-                // Solar data caching removed - no longer needed for heatmap display
-              }
-
-              const nextFarms = (farmsRef.current || []).map(f => {
-                if (f.id !== farmId) return f;
-                return {
-                  ...f,
-                  properties: {
-                    ...f.properties,
-                    avgSuitability: backendAnalysis?.solarSuitability?.summary?.averageSuitability,
-                  },
-                  backendAnalysis,
-                  analysisStatus: 'completed',
-                };
-              });
-              farmsRef.current = nextFarms;
-              if (isMountedRef.current) {
-                setFarms(nextFarms);
-              }
-              if (onFarmsUpdate) {
-                onFarmsUpdate(nextFarms);
-              }
-              console.log('Analysis completed for farm', farmId);
-            } catch (error) {
-              console.warn('Backend analysis failed:', error?.message || error);
-              console.log('Analysis failed for farm', farmId, error?.message || error);
-              updateFarmAnalysisStatus(farmId, 'error');
-            }
-          };
-
-          analyzeFarmInBackground(farm);
+          // Worker will auto-analyze within 60s — no need to trigger via POST.
         }
       } catch (error) {
         console.warn('Error saving farm to backend:', error);

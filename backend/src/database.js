@@ -443,6 +443,16 @@ const queries = {
     );
   },
 
+  // Get farm analysis statuses (lightweight — no analysis_data blob) for a list of ids.
+  // Returns only rows that EXIST in farm_analysis; callers should treat missing ids as not-ready.
+  getFarmAnalysisStatuses: async (farmIds) => {
+    if (!Array.isArray(farmIds) || farmIds.length === 0) return [];
+    return db.any(
+      `SELECT farm_id FROM farm_analysis WHERE farm_id = ANY($1::int[])`,
+      [farmIds]
+    );
+  },
+
   // Save farm analysis
   saveFarmAnalysis: async (farmId, analysisData) => {
     const {

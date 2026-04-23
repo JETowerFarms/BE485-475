@@ -27,6 +27,7 @@ const schema = Joi.object({
     tilt: Joi.number().required(),
     azimuth: Joi.number().required(),
     losses: Joi.number().required(),
+    bifacial: Joi.number().integer().min(0).max(1).optional(),
   }).required(),
   modelFlags: Joi.object().optional(),
 });

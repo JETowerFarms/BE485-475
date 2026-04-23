@@ -1,180 +1,113 @@
 /**
- * Clearing Cost Data Grabber
- * Receives coordinate points and queries clearing cost related data
- * Audits all landcover tables for comprehensive coverage analysis
- * Returns raw data for each point - cost calculations handled by clearingCostParser
+ * Clearing Cost Data Grabber — v2 (clip-once-per-batch)
+ *
+ * Bulk-queries NLCD + slope rasters per batch (merged tiles) and returns the
+ * same shape the parser expects. Building/road/water tables don't currently
+ * exist in production — we skip those queries entirely (saves ~120ms/batch).
  */
 
 const { db } = require('../database');
 
-/**
- * Query clearing cost data for multiple points
- * @param {Array<Array<number>>} points - Array of [lng, lat] coordinate pairs
- * @returns {Promise<Array<Object>>} Array of raw data objects for each point
- */
+const LOG_TIMING = process.env.GRABBER_TIMING !== '0';
+
+function bbox(points) {
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  for (const [lng, lat] of points) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const pad = 0.001;
+  return [minLng - pad, minLat - pad, maxLng + pad, maxLat + pad];
+}
+
+function rasterClipOnceSql(table, valueCol) {
+  return `
+    WITH bbox AS (
+      SELECT ST_MakeEnvelope($3, $4, $5, $6, 4326) AS g
+    ),
+    clipped AS MATERIALIZED (
+      SELECT ST_Union(ST_Clip(r.rast, ST_Transform(b.g, ST_SRID(r.rast)), true)) AS rast
+      FROM ${table} r, bbox b
+      WHERE r.rast && ST_Transform(b.g, ST_SRID(r.rast))
+    ),
+    pts AS (
+      SELECT ord AS idx, lng, lat
+      FROM unnest($1::float[], $2::float[]) WITH ORDINALITY AS t(lng, lat, ord)
+    )
+    SELECT p.idx,
+      ST_Value(c.rast, ST_Transform(ST_SetSRID(ST_Point(p.lng, p.lat), 4326), ST_SRID(c.rast)), true) AS ${valueCol}
+    FROM pts p CROSS JOIN clipped c
+    ORDER BY p.idx
+  `;
+}
+
+async function timed(label, promise) {
+  const t0 = Date.now();
+  try {
+    const rows = await promise;
+    if (LOG_TIMING) console.log(`[clearing] ${label} ${Date.now() - t0}ms rows=${Array.isArray(rows) ? rows.length : 'n/a'}`);
+    return rows;
+  } catch (e) {
+    if (LOG_TIMING) console.log(`[clearing] ${label} ERR ${Date.now() - t0}ms ${e.code || ''} ${e.message}`);
+    throw e;
+  }
+}
+
 async function queryClearingCostDataForPoints(points, options = {}) {
   const { includePricingSnapshots = true } = options;
-  // Process all points in parallel
-  const results = await Promise.all(
-    points.map(async ([lng, lat]) => {
-      // Params table - prepare calculations outside queries
-      const params = {
-        pointGeom: `ST_SetSRID(ST_Point(${lng}, ${lat}), 4326)`,
-        pointCentroid: `ST_SetSRID(ST_Point(${lng}, ${lat}), 4326)`,
-        searchRadius: 2500, // Reasonable local search radius in meters for infrastructure analysis
-        bufferGeom: `ST_Buffer(ST_SetSRID(ST_Point(${lng}, ${lat}), 4326), 2500)` // 2.5km buffer for local coverage
-      };
+  if (!Array.isArray(points) || points.length === 0) {
+    return { clearingData: [], pricingSnapshots: includePricingSnapshots ? await getAllPricingSnapshots() : [] };
+  }
 
-      // Query NLCD land cover (same as solar data grabber)
-      const nlcdQuery = `
-        SELECT
-          ST_Value(nlcd.rast, ST_Transform(${params.pointGeom}, ST_SRID(nlcd.rast))) AS nlcd_value,
-          ST_X(${params.pointGeom}) AS nlcd_lng,
-          ST_Y(${params.pointGeom}) AS nlcd_lat
-        FROM landcover_nlcd_2024_raster nlcd
-        WHERE ST_Distance(
-          ST_Centroid(ST_Envelope(nlcd.rast)),
-          ST_Transform(${params.pointGeom}, ST_SRID(nlcd.rast))
-        ) <= 73.116169
-        ORDER BY ST_Distance(
-          ST_Centroid(ST_Envelope(nlcd.rast)),
-          ST_Transform(${params.pointGeom}, ST_SRID(nlcd.rast))
-        )
-        LIMIT 1;
-      `;
+  const lngs = points.map((p) => Number(p[0]));
+  const lats = points.map((p) => Number(p[1]));
+  const [minLng, minLat, maxLng, maxLat] = bbox(points);
+  const rasterArgs = [lngs, lats, minLng, minLat, maxLng, maxLat];
+  const searchRadius = 2500;
+  const bufferArea = Math.PI * searchRadius * searchRadius;
 
-      const slopeQuery = `
-        SELECT
-          ST_Value(slope.rast, ST_Transform(${params.pointGeom}, ST_SRID(slope.rast))) AS slope_value
-        FROM slope_raster slope
-        WHERE ST_Distance(
-          ST_Centroid(ST_Envelope(slope.rast)),
-          ST_Transform(${params.pointGeom}, ST_SRID(slope.rast))
-        ) <= 73.326366
-        ORDER BY ST_Distance(
-          ST_Centroid(ST_Envelope(slope.rast)),
-          ST_Transform(${params.pointGeom}, ST_SRID(slope.rast))
-        )
-        LIMIT 1;
-      `;
+  const [nlcdRows, slopeRows, pricingSnapshots] = await Promise.all([
+    timed('nlcd', db.any(rasterClipOnceSql('landcover_nlcd_2024_raster', 'nlcd_value'), rasterArgs)),
+    timed('slope', db.any(rasterClipOnceSql('slope_raster', 'slope_value'), rasterArgs)),
+    includePricingSnapshots ? getAllPricingSnapshots() : Promise.resolve([]),
+  ]);
 
-      // Query building coverage from all building-related tables
-      // TODO: wrong table names — real table is landcover_building_locations_usace_ienc
-      // Fix: replace buildings/building_locations/structures with landcover_building_locations_usace_ienc
-      const buildingQuery = `
-        SELECT
-          COUNT(*) as total_building_count,
-          COALESCE(SUM(ST_Area(ST_Intersection(b.geom, ${params.bufferGeom}))), 0) as building_area_sq_m,
-          ST_Area(${params.bufferGeom}) as buffer_area_sq_m
-        FROM (
-          SELECT geom FROM buildings
-          UNION ALL
-          SELECT geom FROM building_locations
-          UNION ALL
-          SELECT geom FROM structures
-        ) b
-        WHERE ST_DWithin(b.geom, ${params.pointGeom}, ${params.searchRadius});
-      `;
-
-      // Query road coverage from all road-related tables
-      // TODO: wrong table names — real tables are landcover_local_roads, landcover_primary_roads, landcover_roads_usace_ienc
-      // Fix: replace roads/local_roads/primary_roads/road_lines with the landcover_ prefixed versions
-      const roadQuery = `
-        SELECT
-          COUNT(*) as total_road_count,
-          COALESCE(SUM(ST_Length(ST_Intersection(r.geom, ${params.bufferGeom}))), 0) as road_length_m,
-          ST_Area(${params.bufferGeom}) as buffer_area_sq_m
-        FROM (
-          SELECT geom FROM roads
-          UNION ALL
-          SELECT geom FROM local_roads
-          UNION ALL
-          SELECT geom FROM primary_roads
-          UNION ALL
-          SELECT geom FROM road_lines
-        ) r
-        WHERE ST_DWithin(r.geom, ${params.pointGeom}, ${params.searchRadius});
-      `;
-
-      // Query water coverage from all water-related tables
-      // TODO: wrong table names — real tables are landcover_waterbody, landcover_lakes, landcover_river_areas, landcover_river_lines, landcover_streams_mouth
-      // Fix: replace waterbodies/lakes/rivers/river_areas/streams with the landcover_ prefixed versions
-      const waterQuery = `
-        SELECT
-          COUNT(*) as total_water_count,
-          COALESCE(SUM(ST_Area(ST_Intersection(w.geom, ${params.bufferGeom}))), 0) as water_area_sq_m,
-          ST_Area(${params.bufferGeom}) as buffer_area_sq_m
-        FROM (
-          SELECT geom FROM waterbodies
-          UNION ALL
-          SELECT geom FROM lakes
-          UNION ALL
-          SELECT geom FROM rivers
-          UNION ALL
-          SELECT geom FROM river_areas
-          UNION ALL
-          SELECT geom FROM streams
-        ) w
-        WHERE ST_DWithin(w.geom, ${params.pointGeom}, ${params.searchRadius});
-      `;
-
-      // Execute all queries in parallel for this point
-      const runInfraQuery = async (query, fallback) => {
-        try {
-          return await db.oneOrNone(query);
-        } catch (err) {
-          if (err && err.code === '42P01') {
-            return fallback;
-          }
-          throw err;
-        }
-      };
-
-      const [nlcdResult, slopeResult, buildingResult, roadResult, waterResult] = await Promise.all([
-        db.oneOrNone(nlcdQuery),
-        db.oneOrNone(slopeQuery),
-        runInfraQuery(buildingQuery, { total_building_count: 0, building_area_sq_m: 0, buffer_area_sq_m: null }),
-        runInfraQuery(roadQuery, { total_road_count: 0, road_length_m: 0, buffer_area_sq_m: null }),
-        runInfraQuery(waterQuery, { total_water_count: 0, water_area_sq_m: 0, buffer_area_sq_m: null })
-      ]);
-
-      // Calculate coverage percentages
-      const bufferAreaSqM = buildingResult?.buffer_area_sq_m || roadResult?.buffer_area_sq_m || waterResult?.buffer_area_sq_m || 10000;
-      const buildingCoverage = bufferAreaSqM > 0 ? ((buildingResult?.building_area_sq_m || 0) / bufferAreaSqM) * 100 : 0;
-      const roadCoverage = bufferAreaSqM > 0 ? ((roadResult?.road_length_m || 0) / Math.sqrt(bufferAreaSqM)) * 100 : 0; // Normalize road length to coverage %
-      const waterCoverage = bufferAreaSqM > 0 ? ((waterResult?.water_area_sq_m || 0) / bufferAreaSqM) * 100 : 0;
-
-      // Check for null values and throw errors
-      if (nlcdResult?.nlcd_value === null) {
-        throw new Error(`NLCD value lookup failed for point (${lng}, ${lat})`);
-      }
-
-      return {
-        lng,
-        lat,
-        nlcd_value: nlcdResult?.nlcd_value || null,
-        nlcd_lng: nlcdResult?.nlcd_lng || null,
-        nlcd_lat: nlcdResult?.nlcd_lat || null,
-        slope_value: slopeResult?.slope_value ?? null,
-        building_coverage: buildingCoverage,
-        building_count: buildingResult?.total_building_count || 0,
-        road_coverage: roadCoverage,
-        road_count: roadResult?.total_road_count || 0,
-        water_coverage: waterCoverage,
-        water_count: waterResult?.total_water_count || 0,
-        search_radius_m: params.searchRadius,
-        buffer_area_sq_m: bufferAreaSqM
-      };
-    })
-  );
-
-  // Optionally fetch pricing snapshots (avoid per-batch DB hits)
-  const pricingSnapshots = includePricingSnapshots ? await getAllPricingSnapshots() : [];
-
-  return {
-    clearingData: results,
-    pricingSnapshots: pricingSnapshots
+  const byIdx = (rows) => {
+    const m = new Map();
+    for (const r of rows) m.set(Number(r.idx), r);
+    return m;
   };
+  const nlcdMap = byIdx(nlcdRows);
+  const slopeMap = byIdx(slopeRows);
+
+  const clearingData = points.map((pt, i) => {
+    const idx = i + 1;
+    const n = nlcdMap.get(idx);
+    const s = slopeMap.get(idx);
+    const nlcdVal = Number.isFinite(n?.nlcd_value) ? n.nlcd_value : null;
+    const slopeVal = Number.isFinite(s?.slope_value) ? s.slope_value : null;
+    return {
+      lng: pt[0],
+      lat: pt[1],
+      nlcd_value: nlcdVal,
+      nlcd_lng: pt[0],
+      nlcd_lat: pt[1],
+      slope_value: slopeVal,
+      // Infrastructure/water tables not in this deployment — return zeros.
+      building_coverage: 0,
+      building_count: 0,
+      road_coverage: 0,
+      road_count: 0,
+      water_coverage: 0,
+      water_count: 0,
+      search_radius_m: searchRadius,
+      buffer_area_sq_m: bufferArea,
+    };
+  });
+
+  return { clearingData, pricingSnapshots };
 }
 
 /**

@@ -13,6 +13,7 @@ const { setTotalPoints, getResults } = require('../utils/solarSuitabilityParser'
 const { queryElevationDataForPoints } = require('../utils/elevationDataGrabber');
 const { setTotalPoints: setElevationTotalPoints, getResults: getElevationResults } = require('../utils/elevationHeatMapParser');
 const { queryClearingCostDataForPoints, getExpectedValues, getAllPricingSnapshots } = require('../utils/clearingCostDataGrabber');
+const { queries } = require('../database');
 
 // Per-user queue manager: each user gets two lanes so their jobs don't collide with other users.
 const userQueues = new Map();
@@ -58,6 +59,7 @@ const analyzeFarmSchema = Joi.object({
     .min(3)
     .required(),
   userId: Joi.string().allow('', null),
+  farmId: Joi.alternatives().try(Joi.string(), Joi.number().integer().positive()).optional(),
 });
 
 // Farm resolution configuration
@@ -844,7 +846,20 @@ function buildDynamicClearingCosts({ clearingData, msuRates, mdotItems, expected
 async function executeAnalysis(value) {
   try {
     const startTime = Date.now();
-    const { coordinates } = value;
+    const { coordinates, farmId } = value;
+
+    // --- Cache check ---
+    if (farmId != null) {
+      try {
+        const cached = await queries.getFarmAnalysis(farmId);
+        if (cached?.analysis_data) {
+          console.log(`[analyze] Cache hit for farm ${farmId}`);
+          return { status: 200, payload: { ...cached.analysis_data, cached: true } };
+        }
+      } catch (cacheErr) {
+        console.warn(`[analyze] Cache lookup failed for farm ${farmId}, proceeding with fresh analysis:`, cacheErr.message);
+      }
+    }
 
     const farmAreaAcres = calculateFarmArea(coordinates);
     const MAX_FARM_ACRES = 1000;
@@ -865,10 +880,19 @@ async function executeAnalysis(value) {
 
     const { ring, gridPoints, coordinatePairs, gridPointCount, boundaryPointCount } = buildGridPoints(coordinates);
 
-    const solarReport = await withSolarLock(() =>
-      generateSolarReportFromGrid(coordinates, ring, gridPoints, coordinatePairs, { gridPointCount, boundaryPointCount })
-    );
+    console.log(`[analyze] farm=${farmId} acres=${farmAreaAcres.toFixed(1)} gridPoints=${gridPointCount} pairs=${coordinatePairs.length} — starting parallel reports`);
+
+    // Run the three reports in parallel — each uses a different C++ parser (no shared state).
+    const [solarReport, elevationReport, clearingCostReport] = await Promise.all([
+      withSolarLock(() =>
+        generateSolarReportFromGrid(coordinates, ring, gridPoints, coordinatePairs, { gridPointCount, boundaryPointCount })
+      ),
+      generateElevationReportFromGrid(coordinates, gridPoints, coordinatePairs),
+      generateClearingCostReportFromGrid(coordinates, gridPoints, coordinatePairs, farmAreaAcres),
+    ]);
+    console.log(`[analyze] farm=${farmId} reports done: solar=${solarReport.success} elev=${elevationReport.success} clearing=${clearingCostReport.success}`);
     if (!solarReport.success) {
+      console.error(`[analyze] farm=${farmId} SOLAR FAIL: ${solarReport.error}`);
       return {
         status: 500,
         payload: {
@@ -879,9 +903,8 @@ async function executeAnalysis(value) {
         },
       };
     }
-
-    const elevationReport = await generateElevationReportFromGrid(coordinates, gridPoints, coordinatePairs);
     if (!elevationReport.success) {
+      console.error(`[analyze] farm=${farmId} ELEV FAIL: ${elevationReport.error}`);
       return {
         status: 500,
         payload: {
@@ -892,14 +915,8 @@ async function executeAnalysis(value) {
         },
       };
     }
-
-    const clearingCostReport = await generateClearingCostReportFromGrid(
-      coordinates,
-      gridPoints,
-      coordinatePairs,
-      farmAreaAcres
-    );
     if (!clearingCostReport.success) {
+      console.error(`[analyze] farm=${farmId} CLEARING FAIL: ${clearingCostReport.error}`);
       return {
         status: 500,
         payload: {
@@ -946,6 +963,30 @@ async function executeAnalysis(value) {
       },
     };
 
+    // --- Cache save ---
+    if (farmId != null) {
+      try {
+        const summary = responsePayload.solarSuitability?.summary || {};
+        const results = responsePayload.solarSuitability?.results || [];
+        const overallScores = results.map((r) => r.overall).filter(Number.isFinite);
+        await queries.saveFarmAnalysis(parseInt(farmId, 10), {
+          total_points: summary.totalPoints ?? results.length,
+          avg_overall: summary.averageSuitability ?? null,
+          avg_land_cover: summary.componentAverages?.land_cover ?? null,
+          avg_slope: summary.componentAverages?.slope ?? null,
+          avg_transmission: summary.componentAverages?.transmission ?? null,
+          avg_population: summary.componentAverages?.population ?? null,
+          min_score: overallScores.length ? Math.min(...overallScores) : null,
+          max_score: overallScores.length ? Math.max(...overallScores) : null,
+          suitable_area_acres: responsePayload.metadata?.farmAreaAcres ?? null,
+          analysis_data: responsePayload,
+        });
+        console.log(`[analyze] Cached analysis for farm ${farmId}`);
+      } catch (saveErr) {
+        console.warn(`[analyze] Failed to cache analysis for farm ${farmId}:`, saveErr.message);
+      }
+    }
+
     return { status: 200, payload: responsePayload };
   } catch (error) {
     console.error('FAST FAIL: Unexpected error in analyze endpoint:', error);
@@ -961,10 +1002,12 @@ async function executeAnalysis(value) {
   }
 }
 
+// In-memory set of farm IDs currently being analyzed so the worker doesn't double-queue.
+const analyzingFarmIds = new Set();
+
 // POST /api/reports/analyze
-// Analyze solar suitability for farm coordinates
+// Non-blocking: if cached, returns result immediately (200). If not, queues and returns 202.
 router.post('/analyze', async (req, res) => {
-  // Fast fail: Validate request immediately
   const { error, value } = analyzeFarmSchema.validate(req.body);
   if (error) {
     return res.status(400).json({
@@ -975,19 +1018,66 @@ router.post('/analyze', async (req, res) => {
     });
   }
 
-  const userId = getUserId(req.body, req.query, req.headers);
+  const { farmId } = value;
+
+  // If there's a farmId, check the cache first and return immediately if hit.
+  if (farmId != null) {
+    try {
+      const cached = await queries.getFarmAnalysis(farmId);
+      if (cached?.analysis_data) {
+        return res.status(200).json({ ...cached.analysis_data, cached: true });
+      }
+    } catch (cacheErr) {
+      console.warn(`[analyze] Cache check failed for farm ${farmId}:`, cacheErr.message);
+    }
+  }
+
+  // Cache miss — queue the analysis in the background and return 202 immediately.
+  if (farmId != null && !analyzingFarmIds.has(String(farmId))) {
+    analyzingFarmIds.add(String(farmId));
+    const userId = getUserId(req.body, req.query, req.headers);
+    enqueueForUser(userId, () => executeAnalysis(value))
+      .then(() => { analyzingFarmIds.delete(String(farmId)); })
+      .catch((err) => {
+        console.error(`[analyze] Background analysis failed for farm ${farmId}:`, err.message);
+        analyzingFarmIds.delete(String(farmId));
+      });
+  }
+
+  return res.status(202).json({
+    success: true,
+    status: 'queued',
+    farmId: farmId ?? null,
+    message: 'Analysis queued — poll GET /api/reports/farm/:farmId for results.',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// GET /api/reports/farm/:farmId
+// Poll for analysis results by farm ID. Returns { status: 'ready', data } or { status: 'pending' }.
+router.get('/farm/:farmId', async (req, res) => {
+  const farmId = parseInt(req.params.farmId, 10);
+  if (!Number.isFinite(farmId) || farmId <= 0) {
+    return res.status(400).json({ success: false, error: 'Invalid farmId' });
+  }
 
   try {
-    const result = await enqueueForUser(userId, () => executeAnalysis(value));
-    res.status(result.status).json(result.payload);
-  } catch (error) {
-    console.error('FAST FAIL: Queue execution error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'FAST FAIL: Internal Server Error',
-      message: error.message,
-      timestamp: new Date().toISOString(),
+    const cached = await queries.getFarmAnalysis(farmId);
+    if (cached?.analysis_data) {
+      return res.status(200).json({
+        status: 'ready',
+        farmId,
+        data: cached.analysis_data,
+      });
+    }
+    const isRunning = analyzingFarmIds.has(String(farmId));
+    return res.status(200).json({
+      status: isRunning ? 'running' : 'pending',
+      farmId,
     });
+  } catch (err) {
+    console.error(`[reports] GET /farm/${farmId} error:`, err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1001,8 +1091,47 @@ router.get('/health', (req, res) => {
   });
 });
 
+// GET /api/reports/status?ids=1,2,3
+// Batch status check — returns one entry per id without the heavy analysis payload.
+// Client should use this instead of polling /farm/:id individually.
+router.get('/status', async (req, res) => {
+  const raw = String(req.query.ids || '');
+  const ids = raw
+    .split(',')
+    .map((s) => parseInt(s, 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (ids.length === 0) {
+    return res.status(200).json({ success: true, results: {} });
+  }
+  if (ids.length > 200) {
+    return res.status(400).json({ success: false, error: 'Too many ids (max 200)' });
+  }
+
+  try {
+    const rows = await queries.getFarmAnalysisStatuses(ids);
+    const readyIds = new Set(rows.map((r) => r.farm_id));
+    const results = {};
+    for (const id of ids) {
+      if (readyIds.has(id)) {
+        results[id] = { status: 'ready' };
+      } else if (analyzingFarmIds.has(String(id))) {
+        results[id] = { status: 'running' };
+      } else {
+        results[id] = { status: 'pending' };
+      }
+    }
+    return res.status(200).json({ success: true, results });
+  } catch (err) {
+    console.error('[reports] GET /status error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = {
   generateSolarReport,
   calculateFarmArea,
-  router
+  executeAnalysis,
+  analyzingFarmIds,
+  router,
 };

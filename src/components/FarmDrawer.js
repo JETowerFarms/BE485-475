@@ -95,7 +95,7 @@ const FarmDrawer = ({
         [-2, -1, 0, 1, 2],
         [
           horizontalCenterOffset - itemSpacing * 1.8,
-          horizontalCenterOffset - itemSpacing * 0.9,
+          horizontalCenterOffset - itemSpacing * 1.2,
           horizontalCenterOffset,
           horizontalCenterOffset + itemSpacing * 0.7,
           horizontalCenterOffset + itemSpacing * 1.3,

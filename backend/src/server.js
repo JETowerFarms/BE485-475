@@ -15,7 +15,9 @@ dotenv.config();
 const farmRoutes = require('./routes/farmHandler');
 const geoRoutes = require('./routes/geo');
 const cropRoutes = require('./routes/crops');
-const reportRoutes = require('./routes/reportsHandler').router;
+const reportsModule = require('./routes/reportsHandler');
+const reportRoutes = reportsModule.router;
+const { startWorker } = require('./analysisWorker');
 const linearOptimizationRoutes = require('./routes/linearOptimization');
 const modelRoutes = require('./routes/models');
 const authRoutes = require('./routes/auth');
@@ -53,18 +55,19 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Rate limiting - global for /api/
+// Rate limiting - global for /api/ (EXCLUDES /api/auth so login is never blocked by app traffic)
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 500,
   message: 'Too many requests from this IP, please try again later.',
+  skip: (req) => req.path.startsWith('/auth'),
 });
 app.use('/api/', limiter);
 
 // Stricter rate limit for login to prevent brute-force attacks
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 attempts per IP per window
+  max: 30, // 30 attempts per IP per window
   message: 'Too many login attempts, please try again later.',
   skipSuccessfulRequests: true,
 });
@@ -135,6 +138,9 @@ async function startServer() {
     if (!dbConnected) {
       console.warn('⚠ Database connection failed. Some endpoints may not work.');
     }
+
+    // Start the background analysis worker
+    startWorker(reportsModule.executeAnalysis, reportsModule.analyzingFarmIds);
 
     // Start listening
     app.listen(PORT, '0.0.0.0', () => {

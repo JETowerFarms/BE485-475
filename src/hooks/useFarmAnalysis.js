@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import { buildApiUrl, apiFetch } from '../config/apiConfig';
-import { validateCoordinates } from '../utils/geometryUtils';
 
 // Farm analysis helpers — writes back into farms array via onFarmsUpdate.
 export const useFarmAnalysis = (farms, onFarmsUpdate, setModalLoading) => {
@@ -21,16 +20,6 @@ export const useFarmAnalysis = (farms, onFarmsUpdate, setModalLoading) => {
       const farmId = farm?.id;
       if (!farmId) return;
 
-      const rawCoordinates = farm?.geometry?.coordinates?.[0] || [];
-      const coordinates =
-        rawCoordinates.length > 1 &&
-        rawCoordinates[0][0] === rawCoordinates[rawCoordinates.length - 1][0] &&
-        rawCoordinates[0][1] === rawCoordinates[rawCoordinates.length - 1][1]
-          ? rawCoordinates.slice(0, -1)
-          : rawCoordinates;
-
-      validateCoordinates(coordinates);
-
       if (typeof setModalLoading === 'function') setModalLoading(true);
       updateFarmById(farmId, (current) => ({
         ...current,
@@ -38,24 +27,25 @@ export const useFarmAnalysis = (farms, onFarmsUpdate, setModalLoading) => {
       }));
 
       try {
-        const response = await apiFetch(buildApiUrl('/reports/analyze'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ coordinates, userId: 'default-user' }),
-        });
+        const response = await apiFetch(buildApiUrl(`/reports/farm/${farmId}`));
 
         if (!response.ok) {
           const errorText = await response.text();
           throw new Error(`Backend API error (${response.status}): ${errorText}`);
         }
 
-        const responseText = await response.text();
-        let backendAnalysis;
-        try {
-          backendAnalysis = JSON.parse(responseText);
-        } catch (parseError) {
-          throw new Error(`Invalid JSON response: ${parseError.message}`);
+        const json = await response.json();
+
+        // If pending/running, the worker will pick it up — just update status and return.
+        if (json.status !== 'ready') {
+          updateFarmById(farmId, (current) => ({
+            ...current,
+            analysisStatus: json.status === 'running' ? 'running' : 'queued',
+          }));
+          return;
         }
+
+        const backendAnalysis = json.data;
 
         updateFarmById(farmId, (current) => ({
           ...current,

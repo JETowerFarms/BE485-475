@@ -28,6 +28,7 @@ export default function App() {
   const [isLoadingMcdData, setIsLoadingMcdData] = useState(false);
   const [savedLocation, setSavedLocation] = useState(null);
   const [isLoadingSavedLocation, setIsLoadingSavedLocation] = useState(true);
+  const [selectedOptimizationModelId, setSelectedOptimizationModelId] = useState(null);
 
   // Load persisted auth token into memory cache on startup
   useEffect(() => { loadToken(); }, []);
@@ -139,7 +140,10 @@ export default function App() {
     setCurrentScreen('linearOptimization');
   };
 
-  const handleBackToFarmDescription = () => {
+  const handleBackToFarmDescription = (modelId = null) => {
+    if (modelId !== null && modelId !== undefined) {
+      setSelectedOptimizationModelId(modelId);
+    }
     setCurrentScreen('farmDescription');
   };
 
@@ -197,6 +201,8 @@ export default function App() {
             onNavigateNext={handleNavigateToNextForm}
             onFarmsUpdate={updateFarms}
             onOpenModelEditor={handleNavigateToModelEditor}
+            selectedModelId={selectedOptimizationModelId}
+            onSelectedModelIdChange={setSelectedOptimizationModelId}
           />
         ) : currentScreen === 'linearOptimization' ? (
           <LinearOptimizationScreen

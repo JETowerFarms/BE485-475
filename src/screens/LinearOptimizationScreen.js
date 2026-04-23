@@ -48,6 +48,8 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         farmName: farm.properties?.name || `Farm ${farms.indexOf(farm) + 1}`,
         optimization: farm.linearOptimization,
         logs: farm.linearOptimizationLogs || null,
+        modelId: farm.linearOptimizationModelId ?? null,
+        modelName: farm.linearOptimizationModelName || null,
       }));
 
     console.log(`[LinearOptimizationScreen] Farms with analysis results: ${results.length}/${farms.length}`);
@@ -69,7 +71,6 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
   const fmtMoney = (v) => (Number.isFinite(v) ? `$${v.toFixed(0)}` : '—');
   const fmtAcres = (v) => (Number.isFinite(v) ? `${v.toFixed(2)} ac` : '—');
 
-  const [showMethodology, setShowMethodology] = useState(false);
   const [graphIndex, setGraphIndex] = useState(0);
   // Build a deck of graphs: one per farm/crop combination
   const graphDeck = useMemo(() => {
@@ -224,17 +225,75 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
   };
 
   const EQUATIONS = [
-    { title: 'Solar CAPEX per acre', eq: 'CAPEX = (C_install / α) + C_site + C_grade + C_retile + C_bond + f_inter × (C_install / α)' },
-    { title: 'Solar energy (year t)', eq: 'E_t = 8760 × CF × 1000 × (1 − d)^t × η_avail × η_curt × η_export' },
-    { title: 'Solar revenue (year t)', eq: 'Rev_t = (E_t / α) × P_elec × (1 + g_elec)^t' },
-    { title: 'Solar NPV (no lease)', eq: 'NPV_solar = Σ_{t=0…T} (Rev_t − Cost_t) / (1+r)^t' },
-    { title: 'ITC benefit (year 2)', eq: 'ITC = CAPEX × itc_rate' },
-    { title: 'Lease rate', eq: 'L = 0.88 × NPV_solar / Σ_{t=1…T} 1/(1+r)^t' },
-    { title: 'Crop PV per acre', eq: 'PV_crop = Σ_{t=1…T} (yield × price_t − cost) / (1+r)^t' },
-    { title: 'Objective (maximize)', eq: 'max z = PV_lease × A_s + Σ_j PV_crop_j × A_cj' },
-    { title: 'Coupling constraint', eq: 'A_s + Σ A_cj = crop_land' },
-    { title: 'Min agriculture', eq: 'Σ A_cj ≥ 0.51 × total_land' },
-    { title: 'Solar cap', eq: 'A_s ≤ min(usable, prime_cap, zoning_cap, interconnect × α)' },
+    {
+      title: 'Solar CAPEX per acre',
+      eq: 'CAPEX = (C_inst/alpha + C_site + C_grade + C_retile + C_bond\n'
+        + '       + f_inter * C_inst/alpha) * (1 + f_soft)',
+    },
+    {
+      title: 'Construction financing factor (IDC)',
+      eq: 'CFF = 0.5*[1+(1-tau)*((1+r_con)^1.5-1)] + 0.5*[1+(1-tau)*((1+r_con)^0.5-1)]\n'
+        + 'Cash CAPEX at t=0 and t=1 = CFF * CAPEX / 2 each',
+    },
+    {
+      title: 'Solar energy (year t)',
+      eq: 'E_t = 8760 * CF * 1000 * clip(dc_ratio,1.15) * (1-d)^(t-2)\n'
+        + '    * eta_avail * eta_curt(t) * eta_export   [kWh/MWac/yr]',
+    },
+    {
+      title: 'Curtailment (year t)',
+      eq: 'eta_curt(t) = max(0, eta_curt_0 - c_inc * (t-2))',
+    },
+    {
+      title: 'Revenue: PPA / merchant tail (year t)',
+      eq: 'Rev_t = (E_t / alpha) * price_t\n'
+        + 'price_t = ppa_price_kwh                   if t < 2 + ppa_years\n'
+        + '        = P_elec_0*(1+g_elec)^t*(1-d_mer)  otherwise',
+    },
+    {
+      title: 'O&M cost (escalating, year t)',
+      eq: 'OM_t = OM_base*(1+g_om)^(t-2) + (veg+ins)*(1+g_opex)^(t-2)\n'
+        + '     + prop_tax*(1+g_ptax)^(t-2)',
+    },
+    {
+      title: 'MACRS 5-yr depreciation tax shield',
+      eq: 'DepBasis = CAPEX * (1 - itc_rate/2)\n'
+        + 'shield_t = DepBasis * MACRS[t-2] * tau_dev\n'
+        + 'MACRS: 20%, 32%, 19.2%, 11.52%, 11.52%, 5.76%',
+    },
+    {
+      title: 'ITC benefit (year 2)',
+      eq: 'ITC = CAPEX * itc_rate  (30% base, up to 70% with adders)',
+    },
+    {
+      title: 'Lease rate (annual $/acre)',
+      eq: 'NPV_dev = sum_{t=0..T} (Rev_t - OM_t - DS + shield_t) / (1+r_dev)^t\n'
+        + 'L = (1 - f_retain) * NPV_dev / sum_{t=1..T} (1+g_lease)^t/(1+r_farmer)^t\n'
+        + 'L = clamp(L, L_min, L_max)   if bounds are set',
+    },
+    {
+      title: 'Crop PV per acre',
+      eq: 'PV_crop_j = sum_{t=1..T} (yield_j * price_jt - cost_j) / (1+r_farmer)^t\n'
+        + 'where price_jt = price_j0 * (1 + g_crop_j)^t',
+    },
+    {
+      title: 'Objective (maximize farmer NPV)',
+      eq: 'max z = PV_lease * A_s + sum_j PV_crop_j * A_cj',
+    },
+    {
+      title: 'Land coupling constraint',
+      eq: 'A_s / (1 - setback) + sum_j A_cj = crop_land\n'
+        + 'crop_land = total_land - easements - wetlands',
+    },
+    {
+      title: 'Min agriculture (traditional crops)',
+      eq: 'sum_j A_cj >= min_ag_frac * total_land',
+    },
+    {
+      title: 'Solar panel-acres cap',
+      eq: 'A_s <= min(usable, prime_cap, zoning_cap, interconnect_MW * alpha)\n'
+        + 'where usable = crop_land * (1 - setback)',
+    },
   ];
 
   const [equations, setEquations] = useState(EQUATIONS);
@@ -328,15 +387,22 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
       text += ` This scenario uses a ${(itc * 100).toFixed(0)}% ITC, boosting developer economics and supporting a higher lease rate to you.`;
     }
 
-    text += `\n\nYour combined net present value — lease income plus crop income${Number.isFinite(eqip) && eqip > 0 ? ' plus EQIP' : ''} — is ${fmt(totalNPV)}.`;
+    const cropsOnlyNPV = cropLand * pvCropPerAc;
+    const npvLift = totalNPV - cropsOnlyNPV;
+
+    text += `\n\nYour combined net present value — lease income plus crop income${Number.isFinite(eqip) && eqip > 0 ? ' plus EQIP' : ''} — is ${fmt(totalNPV)}, which is ${fmt(npvLift)} more compared to ${fmt(cropsOnlyNPV)} when growing only crops across all ${cropLand.toFixed(1)} farmable acres.`;
 
     return text;
   };
 
-  const renderScenario = (cropName, scenarioKey, scenario) => {
+  const renderScenario = (cropName, scenarioKey, scenario, modelMeta = {}) => {
     const pvCrop = scenario.pv_crop_per_acre?.[cropName];
     const displayName = scenario.scenario_name || `${scenarioKey} ITC`;
     const incentives = scenario.incentives_applied || [];
+    const modelLabel = modelMeta.modelName || 'Default';
+    const modelIdLabel = Number.isFinite(modelMeta.modelId)
+      ? ` (ID: ${modelMeta.modelId})`
+      : '';
     return (
       <View key={scenarioKey} style={styles.scenarioCard}>
         <Text style={styles.scenarioTitle}>{displayName}</Text>
@@ -363,12 +429,40 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
           <View style={styles.row}><Text style={styles.label}>EQIP one-time benefit</Text><Text style={styles.value}>{fmtMoney(scenario.eqip_one_time_benefit)}</Text></View>
         )}
         <View style={styles.row}><Text style={styles.label}>Objective (farmer NPV)</Text><Text style={styles.value}>{fmtMoney(scenario.objective_farmer_NPV)}</Text></View>
+        {Array.isArray(scenario.annual_npv_table) && scenario.annual_npv_table.length > 0 && (
+          <View style={styles.annualTableSection}>
+            <Text style={styles.annualTableTitle}>Annual Cashflow &amp; NPV</Text>
+            <View style={styles.annualTableScroll}>
+              <View style={styles.annualTableInner}>
+                <View style={styles.annualTableHeaderRow}>
+                  <Text style={[styles.annualTableCell, styles.annualTableHeaderCell, { width: 50 }]}>Year</Text>
+                  <Text style={[styles.annualTableCell, styles.annualTableHeaderCell, { width: 90 }]}>Lease</Text>
+                  <Text style={[styles.annualTableCell, styles.annualTableHeaderCell, { width: 90 }]}>Crop</Text>
+                  <Text style={[styles.annualTableCell, styles.annualTableHeaderCell, { width: 90 }]}>Total</Text>
+                  <Text style={[styles.annualTableCell, styles.annualTableHeaderCell, { width: 90 }]}>Discounted</Text>
+                  <Text style={[styles.annualTableCell, styles.annualTableHeaderCell, { width: 110 }]}>Cum. NPV</Text>
+                </View>
+                {scenario.annual_npv_table.map((row) => (
+                  <View key={row.year} style={[styles.annualTableRow, row.year % 2 === 0 && styles.annualTableRowEven]}>
+                    <Text style={[styles.annualTableCell, { width: 50 }]}>{row.year}</Text>
+                    <Text style={[styles.annualTableCell, { width: 90 }]}>{fmtMoney(row.lease_income)}</Text>
+                    <Text style={[styles.annualTableCell, { width: 90 }]}>{fmtMoney(row.crop_income)}</Text>
+                    <Text style={[styles.annualTableCell, { width: 90 }]}>{fmtMoney(row.total_income)}</Text>
+                    <Text style={[styles.annualTableCell, { width: 90 }]}>{fmtMoney(row.discounted_cashflow)}</Text>
+                    <Text style={[styles.annualTableCell, { width: 110 }]}>{fmtMoney(row.cumulative_npv)}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+        )}
+        <Text style={styles.modelUsedParagraph}>{`Model used: ${modelLabel}${modelIdLabel}.`}</Text>
         <Text style={styles.narrativeParagraph}>{buildNarrative(cropName, scenario)}</Text>
       </View>
     );
   };
 
-  const renderReport = (optimization) => {
+  const renderReport = (optimization, modelMeta = {}) => {
     // optimization shape: { [cropName]: { '#1': scenario, '#2': scenario, '#3': scenario } }
     if (!optimization || typeof optimization !== 'object') return null;
     const cropNames = Object.keys(optimization);
@@ -378,7 +472,7 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         <View key={crop} style={styles.cropCard}>
           <Text style={styles.cropTitle}>{crop}</Text>
           <View style={styles.scenarioRow}>
-            {scenarios['#1'] && renderScenario(crop, '#1', scenarios['#1'])}
+            {scenarios['#1'] && renderScenario(crop, '#1', scenarios['#1'], modelMeta)}
           </View>
         </View>
       );
@@ -400,6 +494,7 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         <Text style={styles.headerTitle}>Agrivoltaics Analysis Results</Text>
       </View>
 
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
       {/* Graph Display Area */}
       <View style={styles.graphContainer}>
           <View style={styles.graphHeaderRow}>
@@ -422,25 +517,10 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
         <View style={styles.graphWrapper}>
           {renderGraph()}
         </View>
-        <View style={styles.methodRow}>
-          <Pressable onPress={() => setShowMethodology(!showMethodology)} style={styles.methodToggle}>
-            <Text style={styles.methodToggleText}>{showMethodology ? 'Hide Methodology' : 'Show Methodology'}</Text>
-          </Pressable>
-        </View>
-        {showMethodology && (
-          <ScrollView style={styles.methodPanel} nestedScrollEnabled>
-            {equations.map((eq, i) => (
-              <View key={i} style={styles.eqRow}>
-                <Text style={styles.eqTitle}>{eq.title}</Text>
-                <Text style={styles.eqText}>{eq.eq}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        )}
       </View>
 
-      {/* Info Display Area (40%) */}
-      <ScrollView style={styles.infoContainer} contentContainerStyle={styles.infoContent}>
+      {/* Info Display Area */}
+      <View style={[styles.infoContainer, styles.infoContent]}>
         {analysisResults.length === 0 ? (
           <View style={styles.infoCard}>
             <Text style={styles.infoTitle}>No Analysis Results</Text>
@@ -454,14 +534,23 @@ const LinearOptimizationScreen = ({ farms, onBack }) => {
             return (
               <View key={index} style={styles.infoCard}>
                 <Text style={styles.infoTitle}>{result.farmName}</Text>
+                <Text style={styles.infoMeta}>
+                  {`Model used: ${result.modelName || 'Default'}${
+                    Number.isFinite(result.modelId) ? ` (ID: ${result.modelId})` : ''
+                  }`}
+                </Text>
                 <View style={styles.outputContainer}>
-                  {renderReport(result.optimization)}
+                  {renderReport(result.optimization, {
+                    modelId: result.modelId,
+                    modelName: result.modelName,
+                  })}
                   {/* Logs hidden per request */}
                 </View>
               </View>
             );
           })
         )}
+      </View>
       </ScrollView>
 
     </SafeAreaView>
@@ -655,8 +744,14 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     lineHeight: 16,
   },
-  infoContainer: {
+  scrollContainer: {
     flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  infoContainer: {
     backgroundColor: COLORS.background,
   },
   infoContent: {
@@ -677,6 +772,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.text,
     marginBottom: 12,
+  },
+  infoMeta: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    marginBottom: 8,
+    fontWeight: '600',
   },
   infoPlaceholder: {
     fontSize: 14,
@@ -715,7 +816,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     padding: 10,
-    overflow: 'hidden',
   },
   scenarioTitle: {
     color: '#F5E6C8',
@@ -781,6 +881,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontStyle: 'italic',
+  },
+  modelUsedParagraph: {
+    marginTop: 8,
+    color: '#E8E0D6',
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  annualTableSection: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#3A3A3A',
+    paddingTop: 8,
+  },
+  annualTableTitle: {
+    color: '#E8E0D6',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  annualTableScroll: {
+    maxHeight: 500,
+    overflow: 'scroll',
+  },
+  annualTableInner: {
+    minWidth: 520,
+  },
+  annualTableHeaderRow: {
+    flexDirection: 'row',
+    backgroundColor: '#2A2520',
+    borderBottomWidth: 1,
+    borderBottomColor: '#5A554E',
+  },
+  annualTableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#333',
+  },
+  annualTableRowEven: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  annualTableCell: {
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    fontSize: 11,
+    color: '#C8C0B4',
+    textAlign: 'right',
+  },
+  annualTableHeaderCell: {
+    fontWeight: '700',
+    color: '#E8E0D6',
+    fontSize: 10,
   },
   logsContainer: {
     marginTop: 12,

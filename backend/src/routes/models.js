@@ -5,21 +5,102 @@ const { db } = require('../database');
 const router = express.Router();
 
 const DEFAULT_EQUATIONS = [
-  { title: 'Solar CAPEX per acre', eq: 'CAPEX = [(C_install / α) + C_site + C_grade + C_retile + C_bond + f_inter × (C_install / α)] × (1 + f_soft)' },
-  { title: 'Construction financing (IDC)', eq: 'ConFinFactor = 0.5×[1 + (1−τ)×((1+r_con)^1.5 − 1)] + 0.5×[1 + (1−τ)×((1+r_con)^0.5 − 1)]' },
-  { title: 'Solar energy (year t)', eq: 'E_t = 8760 × CF × R_dc:ac × clip_limit × 1000 × (1−d)^t × η_avail × η_curt(t) × η_export' },
-  { title: 'Curtailment (increasing)', eq: 'η_curt(t) = η_curt × (1 − c_inc × (t−2))' },
-  { title: 'Revenue: PPA / merchant', eq: 'Rev_t = E_t/α × (PPA_rate if t<PPA_end, else P_elec(t) × (1−d_merchant))' },
-  { title: 'O&M cost (escalating)', eq: 'OM_t = OM_base × (1+g_om)^(t−2) + (Veg+Ins) × (1+g_opex)^(t−2) + PropTax × (1+g_ptax)^(t−2)' },
-  { title: 'Debt service (annual)', eq: 'DS = P_debt × r(1+r)^n / [(1+r)^n − 1]' },
-  { title: 'MACRS depreciation', eq: 'DepBasis = CAPEX × (1 − ITC/2); shield_yr = DepBasis × MACRS_5yr[i] × τ_dev' },
-  { title: 'ITC benefit (year 2)', eq: 'ITC = CAPEX × itc_rate (30% base, up to 70% with adders)' },
-  { title: 'Lease rate', eq: 'L = (1 − f_retain) × NPV_solar / Σ_{t=1…T} 1/(1+r_farmer)^t' },
-  { title: 'Crop PV per acre', eq: 'PV_crop = Σ_{t=1…T} (yield × price_t − cost) / (1+r_farmer)^t' },
-  { title: 'Objective (maximize)', eq: 'max z = PV_lease × A_s + Σ_j PV_crop_j × A_cj' },
-  { title: 'Coupling constraint', eq: 'A_s + Σ A_cj = crop_land' },
-  { title: 'Min agriculture', eq: 'Σ A_cj ≥ 0.51 × total_land' },
-  { title: 'Solar cap', eq: 'A_s ≤ min(usable, prime_cap, zoning_cap, interconnect × α)' },
+  {
+    title: 'Solar CAPEX per acre',
+    eq: 'CAPEX = (C_inst/alpha + C_site + C_grade + C_retile + C_bond\n'
+      + '       + f_inter * C_inst/alpha) * (1 + f_soft)\n'
+      + 'where C_inst = installed_cost_per_MW / alpha\n'
+      + '      alpha  = land_intensity_acres_per_MW',
+  },
+  {
+    title: 'Construction financing factor (IDC)',
+    eq: 'CFF = 0.5 * [1 + (1-tau) * ((1+r_con)^1.5 - 1)]\n'
+      + '    + 0.5 * [1 + (1-tau) * ((1+r_con)^0.5 - 1)]\n'
+      + 'where r_con = construction_interest_rate\n'
+      + '      tau   = developer_tax_rate\n'
+      + 'Cash CAPEX year 0 & 1 = CFF * CAPEX / 2 each',
+  },
+  {
+    title: 'Solar energy (year t)',
+    eq: 'E_t = 8760 * CF * 1000 * clip(dc_ratio, 1.15)\n'
+      + '    * (1 - d)^(t-2) * eta_avail * eta_curt(t) * eta_export\n'
+      + '                                                  [kWh / MWac / yr]\n'
+      + 'where d = degradation_rate, CF from PVWatts API',
+  },
+  {
+    title: 'Curtailment (year t)',
+    eq: 'eta_curt(t) = max(0, eta_curt_0 - c_inc * (t - 2))\n'
+      + 'where eta_curt_0 = curtailment_factor\n'
+      + '      c_inc      = curtailment_annual_increase',
+  },
+  {
+    title: 'Revenue: PPA / merchant tail (year t)',
+    eq: 'Rev_t = (E_t / alpha) * price_t             [$/acre/yr]\n'
+      + 'price_t = ppa_price_kwh                     if t < 2 + ppa_years\n'
+      + '        = P_elec_0 * (1+g_elec)^t * (1 - d_merchant)  otherwise\n'
+      + 'where d_merchant = merchant_discount',
+  },
+  {
+    title: 'O&M cost (year t, escalating)',
+    eq: 'OM_t = OM_base * (1 + g_om)^(t-2)\n'
+      + '     + (veg + ins) * (1 + g_opex)^(t-2)\n'
+      + '     + prop_tax * (1 + g_ptax)^(t-2)\n'
+      + 'where OM_base = oandm_cost_per_kw * 1000 / alpha',
+  },
+  {
+    title: 'Debt service (annual)',
+    eq: 'DS = P_debt * r_d * (1+r_d)^n / ((1+r_d)^n - 1)\n'
+      + 'where P_debt = CAPEX * debt_fraction\n'
+      + '      r_d    = debt_interest_rate\n'
+      + '      n      = debt_term_years',
+  },
+  {
+    title: 'MACRS 5-yr depreciation tax shield',
+    eq: 'DepBasis = CAPEX * (1 - itc_rate/2)         [IRC sec 50(c)(3)]\n'
+      + 'shield_t = DepBasis * MACRS[t-2] * tau_dev\n'
+      + 'MACRS schedule (t=2..7): 20%, 32%, 19.2%, 11.52%, 11.52%, 5.76%\n'
+      + 'where tau_dev = developer_tax_rate',
+  },
+  {
+    title: 'ITC benefit (year 2, placed in service)',
+    eq: 'ITC = CAPEX * itc_rate\n'
+      + 'itc_rate: 30% base + adders (energy community, domestic content,\n'
+      + '          low-income) up to 70% effective rate',
+  },
+  {
+    title: 'Lease rate (annual $/acre)',
+    eq: 'NPV_dev = sum_{t=0..T} (Rev_t - OM_t - DS + shield_t) / (1+r_dev)^t\n'
+      + '        - decommission / (1+r_dev)^T\n'
+      + 'PV_ann  = sum_{t=1..T} (1+g_lease)^t / (1+r_farmer)^t\n'
+      + 'L = (1 - f_retain) * NPV_dev / PV_ann\n'
+      + 'L = clamp(L, L_min, L_max)           if bounds are set',
+  },
+  {
+    title: 'Crop PV per acre',
+    eq: 'PV_crop_j = sum_{t=1..T} (yield_j * price_jt - cost_j) / (1+r_farmer)^t\n'
+      + 'where price_jt = price_j0 * (1 + g_crop_j)^t',
+  },
+  {
+    title: 'Objective (maximize farmer NPV)',
+    eq: 'max z = PV_lease * A_s + sum_j PV_crop_j * A_cj\n'
+      + 'where PV_lease = L * PV_ann',
+  },
+  {
+    title: 'Land coupling constraint',
+    eq: 'A_s / (1 - setback) + sum_j A_cj = crop_land\n'
+      + 'where crop_land = total_land - easements - wetlands\n'
+      + '      setback   = constraints_setback_fraction',
+  },
+  {
+    title: 'Min agriculture (traditional crops)',
+    eq: 'sum_j A_cj >= min_ag_frac * total_land\n'
+      + 'where min_ag_frac = constraints_min_ag_fraction (default 0.51)',
+  },
+  {
+    title: 'Solar panel-acres cap',
+    eq: 'A_s <= min(usable, prime_cap, zoning_cap, interconnect_MW * alpha)\n'
+      + 'where usable = crop_land * (1 - setback)',
+  },
 ];
 
 const FIELD_DEFS = [

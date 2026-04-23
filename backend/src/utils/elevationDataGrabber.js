@@ -1,84 +1,86 @@
 /**
- * Elevation Data Grabber
- * Receives coordinate points and queries elevation data
- * Prepares all spatial filters and parameters internally before querying
- * Sends processed data to elevationHeatMapParser for heatmap generation
+ * Elevation Data Grabber — v2 (clip-once-per-batch)
+ *
+ * Uses the same clip-once CTE strategy as solarDataGrabber: clip the elevation raster
+ * to the batch bbox ONCE, then ST_Value per point against the merged in-memory raster.
+ *
+ * Replaces the previous per-point implementation (one DB query per point).
  */
 
 const { db } = require('../database');
 const { addBatchData } = require('./elevationHeatMapParser');
 
-/**
- * Query elevation data for multiple points
- * @param {Array<Array<number>>} points - Array of [lng, lat] coordinate pairs
- * @returns {Promise<void>} Sends data to parser, no return value
- */
+const LOG_TIMING = process.env.GRABBER_TIMING !== '0';
+
+function bbox(points) {
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  for (const [lng, lat] of points) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const pad = 0.001;
+  return [minLng - pad, minLat - pad, maxLng + pad, maxLat + pad];
+}
+
 async function queryElevationDataForPoints(points) {
-  // Process all points in parallel
-  const results = await Promise.all(
-    points.map(async ([lng, lat]) => {
-      // Params table - prepare calculations outside queries
-      const params = {
-        pointGeom: `ST_SetSRID(ST_Point(${lng}, ${lat}), 4326)`,
-        pointCentroid: `ST_SetSRID(ST_Point(${lng}, ${lat}), 4326)`,
-        searchRadius: 12.869787  // elevation_raster coverage diagonal + 0.005 buffer
-      };
+  if (!Array.isArray(points) || points.length === 0) {
+    addBatchData([]);
+    return;
+  }
 
-      // Query elevation raster directly by coordinates
-      const elevationQuery = `
-        WITH pt AS (
-          SELECT ST_Transform(${params.pointGeom}, 5070) AS geom
-        ), hit AS (
-          SELECT ST_Value(elev.rast, pt.geom) AS val
-          FROM elevation_raster elev, pt
-          WHERE ST_Intersects(elev.rast, pt.geom)
-          ORDER BY ST_Distance(ST_Centroid(ST_Envelope(elev.rast)), pt.geom)
-          LIMIT 1
-        ), nearest AS (
-          SELECT ST_NearestValue(elev.rast, pt.geom) AS val
-          FROM elevation_raster elev, pt
-          ORDER BY ST_Distance(ST_Centroid(ST_Envelope(elev.rast)), pt.geom)
-          LIMIT 1
-        )
-        SELECT
-          COALESCE((SELECT val FROM hit), (SELECT val FROM nearest)) AS elevation,
-          ST_X(${params.pointGeom}) AS elev_lng,
-          ST_Y(${params.pointGeom}) AS elev_lat;
-      `;
+  const lngs = points.map((p) => Number(p[0]));
+  const lats = points.map((p) => Number(p[1]));
+  const [minLng, minLat, maxLng, maxLat] = bbox(points);
 
-      // Execute the query
-      const elevationResult = await db.oneOrNone(elevationQuery);
+  const sql = `
+    WITH bbox AS (
+      SELECT ST_MakeEnvelope($3, $4, $5, $6, 4326) AS g
+    ),
+    clipped AS MATERIALIZED (
+      SELECT ST_Union(ST_Clip(r.rast, ST_Transform(b.g, ST_SRID(r.rast)), true)) AS rast
+      FROM elevation_raster r, bbox b
+      WHERE r.rast && ST_Transform(b.g, ST_SRID(r.rast))
+    ),
+    pts AS (
+      SELECT ord AS idx, lng, lat
+      FROM unnest($1::float[], $2::float[]) WITH ORDINALITY AS t(lng, lat, ord)
+    )
+    SELECT p.idx,
+      ST_Value(c.rast, ST_Transform(ST_SetSRID(ST_Point(p.lng, p.lat), 4326), ST_SRID(c.rast)), true) AS elevation
+    FROM pts p CROSS JOIN clipped c
+    ORDER BY p.idx
+  `;
 
-      // Check for null values and fallback to 0 to avoid hard failure
-      if (!elevationResult || elevationResult.elevation === null) {
-        console.error(`Elevation data lookup failed for point (${lng}, ${lat}); defaulting to 0`);
-      }
+  const t0 = Date.now();
+  const rows = await db.any(sql, [lngs, lats, minLng, minLat, maxLng, maxLat]);
+  if (LOG_TIMING) console.log(`[elev] ${Date.now() - t0}ms rows=${rows.length} points=${points.length}`);
 
-      return {
-        lng,
-        lat,
-        elevation: elevationResult?.elevation ?? 0,
-        elev_lng: elevationResult?.elev_lng ?? null,
-        elev_lat: elevationResult?.elev_lat ?? null
-      };
-    })
-  );
+  const byIdx = new Map();
+  for (const r of rows) byIdx.set(Number(r.idx), r);
 
-  // Send data to parser for processing
+  const results = points.map((pt, i) => {
+    const idx = i + 1;
+    const row = byIdx.get(idx);
+    const elev = Number.isFinite(row?.elevation) ? row.elevation : 0;
+    return {
+      lng: pt[0],
+      lat: pt[1],
+      elevation: elev,
+      elev_lng: pt[0],
+      elev_lat: pt[1],
+    };
+  });
+
   addBatchData(results);
 }
 
-/**
- * Query elevation data for a single point (backward compatibility)
- * @param {number} lng - Longitude
- * @param {number} lat - Latitude
- * @returns {Promise<void>} Sends data to parser
- */
 async function queryElevationDataForPoint(lng, lat) {
   await queryElevationDataForPoints([[lng, lat]]);
 }
 
 module.exports = {
   queryElevationDataForPoints,
-  queryElevationDataForPoint
+  queryElevationDataForPoint,
 };
