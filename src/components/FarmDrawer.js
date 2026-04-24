@@ -5,7 +5,7 @@ import {
   StyleSheet,
   Pressable,
   Animated,
-  Dimensions,
+  useWindowDimensions,
   ActivityIndicator,
   Platform,
 } from 'react-native';
@@ -29,7 +29,8 @@ import {
   calculatePolygonArea,
 } from '../utils/geometryUtils';
 
-const DRAWER_WIDTH = Dimensions.get('window').width * 0.75;
+// Max drawer width so it doesn't flood tablet screens.
+const MAX_DRAWER_WIDTH = 380;
 
 // Animated right-side drawer with farm polygon + view-type carousels.
 const FarmDrawer = ({
@@ -46,17 +47,20 @@ const FarmDrawer = ({
   const carouselRef = useRef(null);
   const horizontalCarouselRef = useRef(null);
 
+  const { width: windowWidth } = useWindowDimensions();
+  const drawerWidth = Math.min(windowWidth * 0.75, MAX_DRAWER_WIDTH);
+
   const tileSize = 120;
   const itemSpacing = tileSize - 20;
   const carouselHeight = itemSpacing * 3;
   const centerOffset = carouselHeight / 2 - tileSize / 2;
 
-  const horizontalCarouselWidth = DRAWER_WIDTH * 0.75;
+  const horizontalCarouselWidth = drawerWidth * 0.75;
   const horizontalCenterOffset = horizontalCarouselWidth / 2 - tileSize / 2;
 
   const drawerTranslateX = drawerAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [DRAWER_WIDTH, 0],
+    outputRange: [drawerWidth, 0],
   });
 
   const carouselAnimationStyle = useCallback(
@@ -301,7 +305,7 @@ const FarmDrawer = ({
 
   return (
     <Animated.View
-      style={[styles.drawer, { transform: [{ translateX: drawerTranslateX }] }]}
+      style={[styles.drawer, { width: drawerWidth, transform: [{ translateX: drawerTranslateX }] }]}
     >
       <Pressable style={styles.drawerHandle} onPress={onToggle}>
         <View style={styles.drawerArrow}>
@@ -393,7 +397,7 @@ const FarmDrawer = ({
               })()}
             </View>
 
-            <View style={styles.horizontalCarouselContainer}>
+            <View style={[styles.horizontalCarouselContainer, { width: horizontalCarouselWidth }]}>
               <Carousel
                 ref={horizontalCarouselRef}
                 data={VIEW_TYPES}
@@ -436,7 +440,6 @@ const styles = StyleSheet.create({
     top: 0,
     right: 0,
     bottom: 0,
-    width: DRAWER_WIDTH,
     flexDirection: 'row',
     zIndex: 200,
   },
@@ -533,7 +536,6 @@ const styles = StyleSheet.create({
   },
   horizontalCarouselContainer: {
     height: 150,
-    width: DRAWER_WIDTH * 0.75,
     alignItems: 'center',
     alignSelf: 'center',
     justifyContent: 'center',
